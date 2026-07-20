@@ -11,6 +11,7 @@ from new_backend.modules.api_testing.routes import router as api_testing_router
 from new_backend.core.websocket import router as websocket_router
 from new_backend.modules.slack.routes import router as slack_router
 from new_backend.modules.network_simulate.routes import router as network_simulate_router
+from new_backend.modules.test_management.routes import router as test_management_router
 from new_backend.core.events import lifespan
 
 if sys.platform == "win32":
@@ -36,6 +37,7 @@ app.add_middleware(
 
 app.include_router(websocket_router, prefix="/ws")
 app.include_router(test_router, prefix="/test")
+app.include_router(test_management_router, prefix="/api")
 # app.include_router(jira_router, prefix="/jira")
 # app.include_router(llm_router, prefix="/llm")
 # app.include_router(slack_router, prefix="/slack")

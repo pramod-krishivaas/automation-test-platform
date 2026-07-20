@@ -1,6 +1,28 @@
 version: '3.8'
 
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_test
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: automation_testing
+      MYSQL_USER: root
+      MYSQL_PASSWORD: Pramod23057
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - test_performance_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   influxdb:
     image: influxdb:2.7
     container_name: influxdb_test
@@ -44,6 +66,7 @@ services:
       retries: 5
 
 volumes:
+  mysql_data:
   influxdb_data:
   grafana_data:
 
