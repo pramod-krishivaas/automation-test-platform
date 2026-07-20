@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Play, History, ChevronLeft, ChevronRight, LayoutDashboard, Zap, FileJson } from 'lucide-react';
+import { Play, History, ChevronLeft, ChevronRight, LayoutDashboard, Zap, FileJson, FilePlus2, AppWindow, ListChecks } from 'lucide-react';
 
 const NAV_ITEMS = [
-    { label: 'Run Tests',    to: '/',            icon: <Play size={18} /> },
-    { label: 'API Matrix',   to: '/api-matrix',  icon: <Zap size={18} /> },
-    { label: 'API Batch',    to: '/api-batch',   icon: <FileJson size={18} /> },
-    { label: 'Jira History', to: '/jira-history',icon: <History size={18} /> },
+    { label: 'Run Tests',       to: '/',                icon: <Play size={18} /> },
+    { label: 'Add Test Case',   to: '/add-test-case',    icon: <FilePlus2 size={18} /> },
+    { label: 'Test Cases',      to: '/test-cases',       icon: <ListChecks size={18} /> },
+    { label: 'Apps & Modules',  to: '/add-app-module',   icon: <AppWindow size={18} /> },
+    // { label: 'API Matrix',   to: '/api-matrix',  icon: <Zap size={18} /> },
+    { label: 'API Batch',       to: '/api-batch',        icon: <FileJson size={18} /> },
+    { label: 'Jira History',    to: '/jira-history',     icon: <History size={18} /> },
 ];
 
 export default function Sidebar() {

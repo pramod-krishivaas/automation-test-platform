@@ -17,6 +17,9 @@ import JiraHistory  from "./components/JiraHistory/JiraHistory";
 import Sidebar      from "./components/Sidebar/Sidebar";
 import APIMatrixTester from "./components/APIMatrixTester/APIMatrixTester";
 import APIBatchTester from "./components/APIBatchTester/APIBatchTester";
+import AddTestCase   from "./components/AddTestCase/AddTestCase";
+import AddAppModule  from "./components/AddAppModule/AddAppModule";
+import TestCases     from "./components/TestCases/TestCases";
 import "./App.css";
 
 /* ─── Shared Jira History Context ─────────────────────────────────────────── */
@@ -94,6 +97,9 @@ function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/"             element={<TestScreenWithHistory />} />
+            <Route path="/add-test-case" element={<AddTestCase />} />
+            <Route path="/add-app-module" element={<AddAppModule />} />
+            <Route path="/test-cases" element={<TestCases />} />
             <Route path="/jira-history" element={<JiraHistoryWithContext />} />
             <Route path="/api-matrix"   element={<APIMatrixTester />} />
             <Route path="/api-batch"    element={<APIBatchTester />} />
