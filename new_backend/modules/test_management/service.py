@@ -31,6 +31,7 @@ from new_backend.modules.test_management.db_models import (
     TestRunResult,
 )
 from new_backend.modules.test_management.runner import runner_service
+from new_backend.modules.test_management.discovery import discover_automation_tests
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -402,6 +403,10 @@ def run_tests_flow(payload: schemas.TestRunCreate, db: Session) -> dict:
         "skipped": skipped,
         "results": [schemas.TestRunResultRead.model_validate(r) for r in created_results],
     }
+
+
+def discover_automation_tests_flow(path: str) -> list[dict]:
+    return discover_automation_tests(path)
 
 
 def list_test_runs_flow(

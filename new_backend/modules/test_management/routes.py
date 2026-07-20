@@ -131,6 +131,12 @@ def delete_test_case(testcase_id: str, db: Session = Depends(get_db)):
     service.delete_test_case_flow(testcase_id, db)
 
 
+# ── Automation discovery ──────────────────────────────────────────────────
+@router.get("/automation-tests", response_model=list[schemas.AutomationTestCase])
+def discover_automation_tests(path: str):
+    return service.discover_automation_tests_flow(path)
+
+
 # ── Test Runs ─────────────────────────────────────────────────────────────
 @router.post("/run-tests", response_model=schemas.RunTestsSummary, status_code=status.HTTP_201_CREATED)
 def run_tests(payload: schemas.TestRunCreate, db: Session = Depends(get_db)):

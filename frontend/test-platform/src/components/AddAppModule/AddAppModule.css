@@ -254,3 +254,17 @@
   color: var(--text-muted);
   font-size: 0.8rem;
 }
+
+.aam-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--accent-blue);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.aam-icon-btn:hover { background: var(--accent-blue-light); }

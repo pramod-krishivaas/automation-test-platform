@@ -323,6 +323,16 @@ class BugRead(BaseModel):
 
 
 # ─────────────────────────────
+# Automation discovery (matches DB test cases to real source code)
+# ─────────────────────────────
+class AutomationTestCase(BaseModel):
+    id: str
+    title: str
+    function_name: str
+    line: int
+
+
+# ─────────────────────────────
 # Dashboard
 # ─────────────────────────────
 class LatestRun(BaseModel):

@@ -454,6 +454,14 @@ body {
 .module-item.status-failed .module-name { color: var(--status-red); }
 .module-item.status-failed .status-label { color: var(--status-red); }
 
+/* Module exists on only one side of the DB / automation-file match */
+.module-item.status-mismatch {
+  border-color: var(--border-color);
+  background: var(--bg-page);
+  opacity: 0.6;
+}
+.module-item.status-mismatch .module-name { color: var(--text-muted); font-style: italic; }
+
 .clickable-module { cursor: pointer; }
 .clickable-module:hover { filter: brightness(0.97); }
 
