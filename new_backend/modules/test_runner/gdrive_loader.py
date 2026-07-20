@@ -138,10 +138,11 @@ def download_apk(gdrive_url: str, progress_callback=None) -> str:
             sys.stderr = ProgressCapture(progress_callback)
 
         # 2. Let gdown decide the filename (original name), download to current dir
+        # Note: gdown 6.x removed the `fuzzy` flag — URL parsing for share-link
+        # formats (e.g. /file/d/<id>/view) is now handled automatically.
         tmp_path = gdown.download(
             gdrive_url,
             quiet=False,
-            fuzzy=True
         )
 
         # 3. Verify the file actually exists and isn't empty

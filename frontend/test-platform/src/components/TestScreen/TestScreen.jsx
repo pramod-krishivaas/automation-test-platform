@@ -6,10 +6,25 @@ import { Play, Terminal, Activity, CheckCircle, Circle, AlertCircle, /* Cpu, */ 
 import UIScreenshotIssues from '../UIScreenshotIssues/UIScreenshotIssues';
 import IssuePanel from '../IssuePanel/IssuePanel';
 import NetworkConfigPanel from '../NetworkConfig/NetworkConfig'
+import catalogService from '../../services/catalogService';
+import testCaseService from '../../services/testCaseService';
 import '../../App.css';
 
 const WS_URL = 'ws://localhost:8000/ws/test-status';
 const API_URL = 'http://localhost:8000';
+
+// Links a DB Application's package_name to the automation framework's app
+// variant key below (APP_VARIANTS) — mirrors new_backend/modules/slack/config.py's
+// PACKAGE_VARIANT_MAP. Kept as a separate frontend copy since APP_VARIANTS itself
+// (the real, validated-at-runtime automation file registry) already lives here.
+const PACKAGE_VARIANT_MAP = {
+    "com.agribride.krishivaas.farmer_app": "regular_farmer",
+    "com.agribride.krishivaas.client_app": "regular_client",
+    "com.agribride.krishivaas.farmer_state_app": "state_farmer",
+    "com.agribride.krishivaas.client_state_app": "state_client",
+};
+
+const normalizeModuleName = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 const APP_VARIANTS = {
     FARMER: {
@@ -59,18 +74,22 @@ const ModuleFlow = ({ modules, isRunning, onToggleModule }) => (
         </h3>
         <div className="module-list">
             {modules.map((mod, idx) => {
-                let statusClass = "status-pending";
+                const mismatched = mod.matched === false;
+                let statusClass = mismatched ? "status-mismatch" : "status-pending";
                 let icon = <Circle size={16} />;
-                if (mod.status === 'completed') { statusClass = "status-success"; icon = <CheckCircle size={16} />; }
-                else if (mod.status === 'running') { statusClass = "status-running"; icon = <Activity size={16} className="icon-pulse" />; }
-                else if (mod.status === 'failed') { statusClass = "status-failed"; icon = <AlertCircle size={16} />; }
+                if (!mismatched && mod.status === 'completed') { statusClass = "status-success"; icon = <CheckCircle size={16} />; }
+                else if (!mismatched && mod.status === 'running') { statusClass = "status-running"; icon = <Activity size={16} className="icon-pulse" />; }
+                else if (!mismatched && mod.status === 'failed') { statusClass = "status-failed"; icon = <AlertCircle size={16} />; }
 
+                const clickable = !isRunning && !mismatched;
                 return (
                     <div key={idx}
-                        className={`module-item ${statusClass} ${!isRunning ? "clickable-module" : ""}`}
-                        onClick={() => !isRunning && onToggleModule(idx)}
-                        style={{ cursor: !isRunning ? 'pointer' : 'default' }}>
-                        {!isRunning ? (
+                        className={`module-item ${statusClass} ${clickable ? "clickable-module" : ""}`}
+                        onClick={() => clickable && onToggleModule(idx)}
+                        style={{ cursor: clickable ? 'pointer' : 'default' }}>
+                        {mismatched ? (
+                            <AlertCircle size={16} className="text-gray-500" style={{ flexShrink: 0 }} />
+                        ) : !isRunning ? (
                             <input type="checkbox" checked={!!mod.isSelected}
                                 onClick={e => e.stopPropagation()}
                                 onChange={() => onToggleModule(idx)}
@@ -78,18 +97,134 @@ const ModuleFlow = ({ modules, isRunning, onToggleModule }) => (
                         ) : (
                             mod.isSelected ? icon : <Circle size={16} className="text-gray-500" />
                         )}
-                        <span className={`module-name ${!mod.isSelected && !isRunning ? 'opacity-50' : ''}`}>
+                        <span className={`module-name ${!mismatched && !mod.isSelected && !isRunning ? 'opacity-50' : ''}`}>
                             {mod.name}
                         </span>
-                        {mod.status === 'running' && <span className="status-label">Testing...</span>}
-                        {mod.status === 'completed' && <span className="status-label" style={{ color: '#22c55e' }}>Completed</span>}
-                        {mod.status === 'failed' && <span className="status-label" style={{ color: '#ef4444' }}>Failed</span>}
+                        {mismatched && (
+                            <span className="status-label" style={{ color: '#94A3B8', fontStyle: 'italic' }}>
+                                {mod.path ? 'Not in test catalog' : 'No automation available'}
+                            </span>
+                        )}
+                        {!mismatched && mod.status === 'running' && <span className="status-label">Testing...</span>}
+                        {!mismatched && mod.status === 'completed' && <span className="status-label" style={{ color: '#22c55e' }}>Completed</span>}
+                        {!mismatched && mod.status === 'failed' && <span className="status-label" style={{ color: '#ef4444' }}>Failed</span>}
                     </div>
                 );
             })}
         </div>
     </div>
 );
+
+/* ─── ReadyTestCases — DB test cases matched against real automation source ──
+ * Purely informational: does not gate what actually runs. Running still
+ * executes via the whole-file automation paths, exactly as before. For each
+ * selected + matched module, cross-references DB test cases (testcase_key)
+ * against @allure.title("ID -- ...") functions found in the module's actual
+ * automation file (via GET /api/automation-tests), scoped per-module since
+ * IDs like "TC_001" are not globally unique across files.
+ * ─────────────────────────────────────────────────────────────────────────── */
+const normalizeTestId = (s) => (s || '').trim().toUpperCase();
+
+const ReadyTestCases = ({ modules }) => {
+    const [dbByModule, setDbByModule] = useState({});
+    const [sourceByModule, setSourceByModule] = useState({});
+    const [loading, setLoading] = useState(false);
+
+    const selectedMatched = modules.filter((m) => m.matched && m.isSelected && m.dbModuleId);
+    const key = selectedMatched.map((m) => m.dbModuleId).join(',');
+
+    useEffect(() => {
+        if (!selectedMatched.length) { setDbByModule({}); setSourceByModule({}); return; }
+        setLoading(true);
+        Promise.all([
+            Promise.all(
+                selectedMatched.map((m) =>
+                    testCaseService.listTestCases({ module_id: m.dbModuleId, page_size: 50 })
+                        .then((res) => [m.name, res.items || []])
+                        .catch(() => [m.name, []])
+                )
+            ),
+            Promise.all(
+                selectedMatched.map((m) =>
+                    (m.path ? catalogService.discoverAutomationTests(m.path) : Promise.resolve([]))
+                        .then((items) => [m.name, items || []])
+                        .catch(() => [m.name, []])
+                )
+            ),
+        ]).then(([dbEntries, sourceEntries]) => {
+            setDbByModule(Object.fromEntries(dbEntries));
+            setSourceByModule(Object.fromEntries(sourceEntries));
+            setLoading(false);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [key]);
+
+    if (!selectedMatched.length) return null;
+
+    return (
+        <div className="dashboard-card">
+            <h3 className="card-title">
+                <CheckCircle size={20} className="icon-blue" /> Test Cases Ready to Run
+            </h3>
+            {loading ? (
+                <div style={{ fontSize: '0.78rem', color: '#94A3B8' }}>Loading test cases...</div>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                    {selectedMatched.map((m) => {
+                        const dbCases = dbByModule[m.name] || [];
+                        const sourceCases = sourceByModule[m.name] || [];
+                        const sourceById = new Map(sourceCases.map((s) => [normalizeTestId(s.id), s]));
+                        const dbByKey = new Map(dbCases.map((tc) => [normalizeTestId(tc.testcase_key), tc]));
+                        const allIds = new Set([...sourceById.keys(), ...dbByKey.keys()]);
+                        const rows = Array.from(allIds)
+                            .map((id) => {
+                                const db = dbByKey.get(id);
+                                const src = sourceById.get(id);
+                                return { id, title: db?.title || src?.title || '', inDb: !!db, inSource: !!src };
+                            })
+                            .sort((a, b) => a.id.localeCompare(b.id));
+
+                        const noIdTagging = sourceCases.length === 0;
+
+                        return (
+                            <div key={m.dbModuleId}>
+                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                    {m.name}
+                                </div>
+                                {noIdTagging ? (
+                                    <div style={{ fontSize: '0.76rem', color: '#94A3B8', fontStyle: 'italic' }}>
+                                        No test IDs found in source — add <code>@allure.title("ID -- ...")</code> to enable per-test-case matching.
+                                    </div>
+                                ) : rows.length === 0 ? (
+                                    <div style={{ fontSize: '0.76rem', color: '#94A3B8' }}>No test cases catalogued yet.</div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                        {rows.map((r) => (
+                                            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem' }}>
+                                                <span style={{ fontFamily: 'monospace', color: '#2563EB', fontWeight: 600, flexShrink: 0 }}>
+                                                    {r.id}
+                                                </span>
+                                                <span style={{ color: '#334155', flex: 1 }}>{r.title}</span>
+                                                <span style={{
+                                                    fontSize: '0.62rem', fontWeight: 700, padding: '2px 7px', borderRadius: '999px',
+                                                    flexShrink: 0,
+                                                    color: r.inDb && r.inSource ? '#16A34A' : '#94A3B8',
+                                                    background: r.inDb && r.inSource ? '#DCFCE7' : '#F1F5F9',
+                                                }}>
+                                                    {r.inDb && r.inSource ? 'Matched' : r.inDb ? 'DB only' : 'Source only'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
 
 /* ─── MetricsChart ───────────────────────────────────────────────────────── */
 /* Temporarily disabled — live profiler metrics are not yet wired to a
@@ -257,21 +392,27 @@ function TestScreen({ onHistoryUpdate }) {
     const [isDeviceConnected, setIsDeviceConnected] = useState(false);
     const [appiumStatus, setAppiumStatus] = useState('stopped');
     const [showStopPopup, setShowStopPopup] = useState(false);
-    const [selectedAppKey, setSelectedAppKey] = useState(() => loadState('selectedAppKey', 'FARMER'));
+    // Holds a DB application_id (UUID), not an APP_VARIANTS enum key — resolved
+    // against the automation file registry via package_name (see matchedModules below).
+    const [selectedAppKey, setSelectedAppKey] = useState(() => loadState('selectedAppKey', ''));
     const [existingApks, setExistingApks] = useState([]);
     const [selectedApk, setSelectedApk] = useState(() => loadState('selectedApk', ''));
     const [hasOpenedReport, setHasOpenedReport] = useState(false);
     const [networkConfig, setNetworkConfig] = useState(null);
     const [showNewTestButton, setShowNewTestButton] = useState(false);
 
+    const [dbApplications, setDbApplications] = useState([]);
+    const [dbModules, setDbModules] = useState([]);
 
     const prevAppKeyRef = useRef(selectedAppKey);
+    // Which app the CURRENT dbModules array actually belongs to — set atomically
+    // at fetch-resolution time (not via a separate state flag) so the reset
+    // effect below can never race against the fetch effect's own state update.
+    const dbModulesAppRef = useRef(null);
 
     const [modules, setModules] = useState(() => {
         const saved = sessionStorage.getItem('modules');
-        if (saved) return JSON.parse(saved);
-        const variant = APP_VARIANTS[selectedAppKey] || APP_VARIANTS['FARMER'];
-        return variant.modules.map(m => ({ ...m, status: 'pending', isSelected: true }));
+        return saved ? JSON.parse(saved) : [];
     });
 
     // Persist state
@@ -295,12 +436,86 @@ function TestScreen({ onHistoryUpdate }) {
         return 'idle';
     };
 
+    // Fetch DB applications once, auto-select the first one if nothing (or a
+    // stale/deleted app) is currently selected.
     useEffect(() => {
+        catalogService.listApplications()
+            .then((res) => {
+                const items = res.items || [];
+                setDbApplications(items);
+                setSelectedAppKey((prev) => {
+                    if (prev && items.some((a) => a.application_id === prev)) return prev;
+                    return items[0]?.application_id || '';
+                });
+            })
+            .catch(() => setDbApplications([]));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Fetch DB modules for the selected application. `cancelled` guards against
+    // a stale response landing after the user has already switched apps again.
+    useEffect(() => {
+        let cancelled = false;
+        if (!selectedAppKey) {
+            setDbModules([]);
+            dbModulesAppRef.current = selectedAppKey;
+            return undefined;
+        }
+        catalogService.listModules(selectedAppKey)
+            .then((res) => {
+                if (cancelled) return;
+                setDbModules(res.items || []);
+                dbModulesAppRef.current = selectedAppKey;
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setDbModules([]);
+                dbModulesAppRef.current = selectedAppKey;
+            });
+        return () => { cancelled = true; };
+    }, [selectedAppKey]);
+
+    const selectedDbApp = dbApplications.find((a) => a.application_id === selectedAppKey) || null;
+
+    const resolvedVariant = selectedDbApp?.package_name
+        ? Object.values(APP_VARIANTS).find((v) => v.id === PACKAGE_VARIANT_MAP[selectedDbApp.package_name]) || null
+        : null;
+
+    // Union of automation-file modules and DB modules, matched by normalized name.
+    // Entries present in only one side are still included (matched: false) so
+    // mismatches stay visible rather than silently disappearing.
+    const matchedModules = React.useMemo(() => {
+        const automationModules = resolvedVariant?.modules || [];
+        const byAutomationName = new Map(automationModules.map((m) => [normalizeModuleName(m.name), m]));
+        const byDbName = new Map(dbModules.map((m) => [normalizeModuleName(m.module_name), m]));
+        const allKeys = new Set([...byAutomationName.keys(), ...byDbName.keys()]);
+
+        return Array.from(allKeys).map((key) => {
+            const automation = byAutomationName.get(key);
+            const db = byDbName.get(key);
+            const matched = !!automation && !!db;
+            return {
+                name: automation?.name || db?.module_name,
+                path: automation?.path || null,
+                dbModuleId: db?.module_id || null,
+                matched,
+                status: 'pending',
+                isSelected: matched,
+            };
+        });
+    }, [resolvedVariant, dbModules]);
+
+    // Reset `modules` when the selected app actually changes — gated on
+    // dbModulesAppRef so this only fires once dbModules is confirmed to belong
+    // to the currently selected app (not stale data from the previous one).
+    useEffect(() => {
+        if (dbModulesAppRef.current !== selectedAppKey) return;
         if (prevAppKeyRef.current !== selectedAppKey) {
-            setModules(APP_VARIANTS[selectedAppKey].modules.map(m => ({ ...m, status: 'pending', isSelected: true })));
+            setModules(matchedModules);
             prevAppKeyRef.current = selectedAppKey;
         }
-    }, [selectedAppKey]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedAppKey, matchedModules]);
 
     const toggleModuleSelection = (index) => {
         if (isRunning) return;
@@ -365,7 +580,8 @@ function TestScreen({ onHistoryUpdate }) {
     const handleRunTest = async () => {
         if (appiumStatus !== 'running') { alert("Appium Server is not running. Start it first."); return; }
         if (!apkUrl && !selectedApk) { alert("Please enter a Google Drive URL or select an existing APK!"); return; }
-        const testsToRun = modules.filter(m => m.isSelected).map(m => ({ name: m.name, path: m.path }));
+        if (!resolvedVariant) { alert("No automation registered for this application (check its package name in Apps & Modules)."); return; }
+        const testsToRun = modules.filter(m => m.matched && m.isSelected).map(m => ({ name: m.name, path: m.path }));
         if (!testsToRun.length) { alert("Please select at least one module to run."); return; }
 
         setHasOpenedReport(false);
@@ -375,7 +591,7 @@ function TestScreen({ onHistoryUpdate }) {
         setIsDownloading(!!apkUrl);
         setLogs([]);
 
-        handleIncomingData({ type: 'LOG', payload: { message: `Initializing ${APP_VARIANTS[selectedAppKey].label} test with ${testsToRun.length} modules...`, status: 'INFO' } });
+        handleIncomingData({ type: 'LOG', payload: { message: `Initializing ${selectedDbApp?.application_name || resolvedVariant.label} test with ${testsToRun.length} modules...`, status: 'INFO' } });
 
         try {
             const runId = crypto.randomUUID();
@@ -407,7 +623,7 @@ function TestScreen({ onHistoryUpdate }) {
             //     }
             // }
 
-            const payload = { tests_to_run: testsToRun, app_type: APP_VARIANTS[selectedAppKey].id, run_id: runId };
+            const payload = { tests_to_run: testsToRun, app_type: resolvedVariant.id, run_id: runId };
             const endpoint = selectedApk ? '/test/start-test-existing' : '/test/start-test';
             const body = selectedApk ? { ...payload, apk_name: selectedApk } : { ...payload, url: apkUrl };
 
@@ -474,13 +690,7 @@ function TestScreen({ onHistoryUpdate }) {
         setLogs([]);
 
         // Reset module statuses
-        setModules(
-            APP_VARIANTS[selectedAppKey].modules.map(m => ({
-                ...m,
-                status: 'pending',
-                isSelected: true
-            }))
-        );
+        setModules(matchedModules);
 
         // Clear session storage
         [
@@ -621,8 +831,8 @@ function TestScreen({ onHistoryUpdate }) {
                             <label className="input-label">Select Application</label>
                             <div className="select-wrapper">
                                 <select className="text-input" value={selectedAppKey} onChange={e => setSelectedAppKey(e.target.value)} disabled={isRunning}>
-                                    {Object.entries(APP_VARIANTS).map(([key, cfg]) => (
-                                        <option key={key} value={key}>{cfg.label}</option>
+                                    {dbApplications.map((app) => (
+                                        <option key={app.application_id} value={app.application_id}>{app.application_name}</option>
                                     ))}
                                 </select>
                             </div>
@@ -662,6 +872,11 @@ function TestScreen({ onHistoryUpdate }) {
                     {/* Module Flow status */}
                     <div className="grid-item-flo">
                         <ModuleFlow modules={modules} isRunning={isRunning} onToggleModule={toggleModuleSelection} />
+                    </div>
+
+                    {/* Test cases catalogued for the selected + matched modules */}
+                    <div className="grid-item-flo">
+                        <ReadyTestCases modules={modules} />
                     </div>
 
                     {/* Network Config */}

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AppWindow, Boxes, AlertCircle, ChevronDown, Save, RotateCcw,
+  AppWindow, Boxes, AlertCircle, ChevronDown, Save, RotateCcw, Pencil,
 } from 'lucide-react';
 import catalogService from '../../services/catalogService';
 import './AddAppModule.css';
@@ -55,6 +55,7 @@ export default function AddAppModule() {
 
   const [appForm, setAppForm] = useState(EMPTY_APP_FORM);
   const [moduleForm, setModuleForm] = useState(EMPTY_MODULE_FORM);
+  const [editingAppId, setEditingAppId] = useState(null);
 
   const [savingApp, setSavingApp] = useState(false);
   const [savingModule, setSavingModule] = useState(false);
@@ -95,20 +96,41 @@ export default function AddAppModule() {
     if (!appForm.applicationName.trim() || !appForm.platform) return;
     setSavingApp(true);
     setError('');
+    const payload = {
+      application_name: appForm.applicationName.trim(),
+      platform: appForm.platform,
+      package_name: appForm.packageName.trim() || null,
+      description: appForm.description.trim() || null,
+    };
     try {
-      await catalogService.createApplication({
-        application_name: appForm.applicationName.trim(),
-        platform: appForm.platform,
-        package_name: appForm.packageName.trim() || null,
-        description: appForm.description.trim() || null,
-      });
+      if (editingAppId) {
+        await catalogService.updateApplication(editingAppId, payload);
+      } else {
+        await catalogService.createApplication(payload);
+      }
       setAppForm(EMPTY_APP_FORM);
+      setEditingAppId(null);
       await refreshApplications();
     } catch (err) {
       setError(err?.response?.data?.detail || 'Failed to save application.');
     } finally {
       setSavingApp(false);
     }
+  };
+
+  const handleEditApplication = (app) => {
+    setEditingAppId(app.application_id);
+    setAppForm({
+      applicationName: app.application_name,
+      platform: app.platform,
+      packageName: app.package_name || '',
+      description: app.description || '',
+    });
+  };
+
+  const handleCancelEditApplication = () => {
+    setEditingAppId(null);
+    setAppForm(EMPTY_APP_FORM);
   };
 
   const handleSaveModule = async () => {
@@ -196,6 +218,11 @@ export default function AddAppModule() {
           </div>
 
           <div className="aam-actions">
+            {editingAppId && (
+              <button className="aam-btn ghost" onClick={handleCancelEditApplication}>
+                Cancel Edit
+              </button>
+            )}
             <button className="aam-btn ghost" onClick={() => setAppForm(EMPTY_APP_FORM)}>
               <RotateCcw size={15} /> Reset
             </button>
@@ -205,7 +232,7 @@ export default function AddAppModule() {
               onClick={handleSaveApplication}
               disabled={savingApp || !appForm.applicationName.trim() || !appForm.platform}
             >
-              <Save size={15} /> {savingApp ? 'Saving...' : 'Save Application'}
+              <Save size={15} /> {savingApp ? 'Saving...' : editingAppId ? 'Update Application' : 'Save Application'}
             </button>
           </div>
         </div>
@@ -220,6 +247,7 @@ export default function AddAppModule() {
                   <th>Package Name</th>
                   <th>Description</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -230,6 +258,16 @@ export default function AddAppModule() {
                     <td className="cell-muted">{a.package_name || '—'}</td>
                     <td className="cell-muted">{a.description || '—'}</td>
                     <td><span className="aam-tag green">{a.status ? 'Active' : 'Inactive'}</span></td>
+                    <td>
+                      <button
+                        className="aam-icon-btn"
+                        onClick={() => handleEditApplication(a)}
+                        title="Edit application"
+                        aria-label="Edit application"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
