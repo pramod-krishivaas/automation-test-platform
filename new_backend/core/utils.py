@@ -3,6 +3,7 @@ import re
 import datetime
 import asyncio
 import os
+import shutil
 import time
 import subprocess
 import uuid
@@ -273,6 +274,83 @@ def start_allure_server() -> str:
         )
         time.sleep(2)
         return f"http://127.0.0.1:{_allure_port}"
+
+
+def resolve_adb_path() -> str:
+    """
+    Resolve the adb executable's absolute path instead of trusting PATH.
+
+    adb is frequently not registered on PATH for every process context (e.g.
+    this backend running under a secondary Windows account, or launched
+    before an installer updated PATH) even though it works fine from an
+    interactive terminal. Falls back through PATH -> ANDROID_HOME /
+    ANDROID_SDK_ROOT -> the default Android Studio SDK install location.
+    """
+    found = shutil.which("adb")
+    if found:
+        return found
+
+    for env_var in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        sdk_root = os.environ.get(env_var)
+        if sdk_root:
+            candidate = os.path.join(sdk_root, "platform-tools", "adb.exe" if os.name == "nt" else "adb")
+            if os.path.isfile(candidate):
+                return candidate
+
+    if os.name == "nt":
+        default = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe"
+        )
+        if os.path.isfile(default):
+            return default
+
+    return "adb"
+
+
+ADB_PATH = resolve_adb_path()
+
+
+def elevate_adb_server() -> bool:
+    """
+    Restarts the adb server under elevated (admin) privileges.
+
+    Needed when the backend runs under a secondary/standard Windows account:
+    a non-elevated adb server often can't see USB devices. This is called
+    once at app startup (triggers a single UAC prompt) — after that, plain
+    'adb devices' calls just talk to this already-elevated server over TCP
+    and don't need admin rights themselves, so the 5s /device-status poll
+    from the frontend stays prompt-free.
+    """
+    try:
+        subprocess.run([ADB_PATH, "kill-server"], capture_output=True, text=True, timeout=5)
+    except Exception as e:
+        print(f"⚠️ adb kill-server skipped: {e}")
+
+    if os.name != "nt":
+        try:
+            subprocess.run([ADB_PATH, "start-server"], capture_output=True, text=True, timeout=10)
+            return True
+        except Exception as e:
+            print(f"❌ adb start-server failed: {e}")
+            return False
+
+    try:
+        ps_cmd = (
+            f"Start-Process -FilePath '{ADB_PATH}' -ArgumentList 'start-server' "
+            "-Verb RunAs -WindowStyle Hidden -Wait"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            print("✅ adb server started with elevated (admin) privileges")
+            return True
+        print(f"❌ Elevated adb start-server exited with code {result.returncode}: {result.stderr.strip()}")
+        return False
+    except Exception as e:
+        print(f"❌ adb elevation error: {e}")
+        return False
 
 
 def generate_run_id():
