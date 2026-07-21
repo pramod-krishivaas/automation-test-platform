@@ -16,7 +16,7 @@ from new_backend.core.state import (
     PAYLOAD_PREFIXES
 )
 from new_backend.core.state import reset_run_state, runs, appium_proc, APPIUM_PORT
-from new_backend.core.utils import pick_free_port, parse_step_from_message
+from new_backend.core.utils import pick_free_port, parse_step_from_message, ADB_PATH
 from new_backend.core.constants import ALLURE_CMD, ALLURE_REPORT_DIR
 from fastapi import HTTPException
 from new_backend.core.websocket import manager
@@ -92,10 +92,11 @@ async def log_step_flow(msg):
 
 async def device_status_flow():
     try:
-        result = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run([ADB_PATH, "devices"], capture_output=True, text=True, timeout=5)
         lines = result.stdout.strip().splitlines()[1:]
         return {"connected": any("\tdevice" in line for line in lines)}
-    except Exception:
+    except Exception as e:
+        logger.error(f"adb devices check failed (ADB_PATH={ADB_PATH}): {e}")
         return {"connected": False}
     
 async def appium_start_flow():
