@@ -25,6 +25,11 @@ class Application(Base):
     application_name: Mapped[str] = mapped_column(String(150), nullable=False)
     platform: Mapped[str] = mapped_column(String(30), nullable=False)
     package_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Automation role key for the unified app: regular_farmer | regular_client |
+    # state_farmer | state_client. Since all four "Unified …" rows share one
+    # package_name, this — not package_name — is what maps a UI selection to its
+    # test folder (APP_VARIANTS on the frontend / target-role in the runner).
+    variant: Mapped[str | None] = mapped_column(String(30), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP, server_default=text("CURRENT_TIMESTAMP"))

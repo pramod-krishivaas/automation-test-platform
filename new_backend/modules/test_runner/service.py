@@ -16,7 +16,7 @@ from new_backend.core.state import (
     PAYLOAD_PREFIXES
 )
 from new_backend.core.state import reset_run_state, runs, appium_proc, APPIUM_PORT
-from new_backend.core.utils import pick_free_port, parse_step_from_message, ADB_PATH
+from new_backend.core.utils import pick_free_port, parse_step_from_message, ADB_PATH, build_tool_env, JAVA_HOME
 from new_backend.core.constants import ALLURE_CMD, ALLURE_REPORT_DIR
 from fastapi import HTTPException
 from new_backend.core.websocket import manager
@@ -107,9 +107,17 @@ async def appium_start_flow():
         if s.connect_ex(("127.0.0.1", APPIUM_PORT)) == 0:
             return {"status": "running", "message": f"Appium already active on port {APPIUM_PORT}"}
     try:
+        # Launch Appium with JAVA_HOME / ANDROID_HOME guaranteed in its environment,
+        # so the UiAutomator2 driver can find java (APK signature verification) even
+        # when the backend itself was started without them (secondary Windows account).
+        appium_env = build_tool_env()
         appium_proc = subprocess.Popen(["appium", "-p", str(APPIUM_PORT)],
-                                         shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return {"status": "started", "message": f"Appium started on port {APPIUM_PORT}"}
+                                         shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                         env=appium_env)
+        msg = f"Appium started on port {APPIUM_PORT}"
+        if not JAVA_HOME:
+            msg += " (⚠️ no JDK found — set JAVA_HOME; APK signature checks may fail)"
+        return {"status": "started", "message": msg, "java_home": JAVA_HOME}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
     
@@ -378,7 +386,8 @@ async def start_test_flow(request, background_tasks, manager):
         app_version = info.get("app_version")
         package_name = info.get("package_name")
 
-        app_variant = detect_app_variant(package_name, app_name)
+        # Prefer the UI-selected role over package detection (unified app).
+        app_variant = getattr(request, "app_type", None) or detect_app_variant(package_name, app_name)
 
         tests_to_run = request.tests_to_run or APP_VARIANTS.get(
             app_variant,
@@ -416,6 +425,7 @@ async def start_test_flow(request, background_tasks, manager):
             app_version=info.get("app_version"),
             developer_name=developer_name,
             channel_id=SLACK_NOTIFY_CHANNEL,
+            app_type=app_variant,
         )
 
         return {
@@ -477,12 +487,18 @@ async def start_test_existing_flow(request, background_tasks, manager):
         package_name = info["package_name"]
         app_name     = info["app_name"]
         app_version  = info["app_version"]
-        app_variant   = detect_app_variant(package_name, app_name)
+        # Prefer the role explicitly chosen in the UI (unified app: one package =
+        # many roles, so package-name detection can't disambiguate). Fall back to
+        # package detection only when the UI didn't send a variant.
+        app_variant   = getattr(request, "app_type", None) or detect_app_variant(package_name, app_name)
         variant_tests = APP_VARIANTS.get(app_variant, [])
         tests_to_run = request.tests_to_run
 
         if tests_to_run:
-            valid   = [t for t in tests_to_run if os.path.isfile(os.path.join(BASE_DIR, t["path"]))]
+            # Test paths are repo-relative and live at the repo root, NOT under
+            # new_backend (which is what BASE_DIR points to) — validate against
+            # PROJECT_ROOT, the same base the pytest runner uses.
+            valid   = [t for t in tests_to_run if os.path.isfile(os.path.join(PROJECT_ROOT, t["path"]))]
             invalid = [t for t in tests_to_run if t not in valid]
 
             if invalid:
@@ -522,6 +538,9 @@ async def start_test_existing_flow(request, background_tasks, manager):
             # developer_name = info.get("developer_name"),
             developer_name=APP_DEVELOPER_MAP.get(app_variant, "Unknown Developer"),
             channel_id=SLACK_NOTIFY_CHANNEL,
+            # Prefer the role explicitly chosen in the UI; fall back to the
+            # package-detected variant only if the UI didn't send one.
+            app_type=getattr(request, "app_type", None) or app_variant,
         )
 
 

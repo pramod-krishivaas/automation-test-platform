@@ -45,6 +45,8 @@ class ApplicationBase(BaseModel):
     application_name: str = Field(..., max_length=150)
     platform: str = Field(..., max_length=30)
     package_name: str | None = Field(None, max_length=255)
+    # Automation role key: regular_farmer | regular_client | state_farmer | state_client
+    variant: str | None = Field(None, max_length=30)
     description: str | None = None
     status: bool = True
 
@@ -57,6 +59,7 @@ class ApplicationUpdate(BaseModel):
     application_name: str | None = Field(None, max_length=150)
     platform: str | None = Field(None, max_length=30)
     package_name: str | None = Field(None, max_length=255)
+    variant: str | None = Field(None, max_length=30)
     description: str | None = None
     status: bool | None = None
 
@@ -326,9 +329,9 @@ class BugRead(BaseModel):
 # Automation discovery (matches DB test cases to real source code)
 # ─────────────────────────────
 class AutomationTestCase(BaseModel):
-    id: str
+    id: str | None = None          # split from "ID -- desc" allure title, if present
     title: str
-    function_name: str
+    function_name: str             # the source `def` name — used to match a DB testcase_key
     line: int
 
 

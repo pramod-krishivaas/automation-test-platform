@@ -7,10 +7,21 @@ import './AddAppModule.css';
 
 const PLATFORM_OPTIONS = ['Android', 'iOS', 'Web'];
 
+// Automation role key that maps a UI app selection to its test folder / target-role.
+// Required for the unified app, where all four roles share one package_name.
+const VARIANT_OPTIONS = [
+  { value: 'regular_farmer', label: 'Regular Farmer' },
+  { value: 'regular_client', label: 'Regular Client' },
+  { value: 'state_farmer', label: 'Telangana Farmer' },
+  { value: 'state_client', label: 'Telangana Client' },
+];
+const VARIANT_LABEL = Object.fromEntries(VARIANT_OPTIONS.map((o) => [o.value, o.label]));
+
 const EMPTY_APP_FORM = {
   applicationName: '',
   platform: '',
   packageName: '',
+  variant: '',
   description: '',
 };
 
@@ -100,6 +111,7 @@ export default function AddAppModule() {
       application_name: appForm.applicationName.trim(),
       platform: appForm.platform,
       package_name: appForm.packageName.trim() || null,
+      variant: appForm.variant || null,
       description: appForm.description.trim() || null,
     };
     try {
@@ -124,6 +136,7 @@ export default function AddAppModule() {
       applicationName: app.application_name,
       platform: app.platform,
       packageName: app.package_name || '',
+      variant: app.variant || '',
       description: app.description || '',
     });
   };
@@ -196,6 +209,16 @@ export default function AddAppModule() {
             </div>
 
             <div className="aam-field">
+              <Label>Variant</Label>
+              <Select
+                value={appForm.variant}
+                onChange={setAppField('variant')}
+                options={VARIANT_OPTIONS}
+                placeholder="Select Variant"
+              />
+            </div>
+
+            <div className="aam-field span-2">
               <Label>Package Name</Label>
               <input
                 className="aam-input"
@@ -244,6 +267,7 @@ export default function AddAppModule() {
                 <tr>
                   <th>Name</th>
                   <th>Platform</th>
+                  <th>Variant</th>
                   <th>Package Name</th>
                   <th>Description</th>
                   <th>Status</th>
@@ -255,6 +279,7 @@ export default function AddAppModule() {
                   <tr key={a.application_id}>
                     <td className="cell-name">{a.application_name}</td>
                     <td><span className="aam-tag blue">{a.platform}</span></td>
+                    <td>{a.variant ? <span className="aam-tag purple">{VARIANT_LABEL[a.variant] || a.variant}</span> : <span className="cell-muted">—</span>}</td>
                     <td className="cell-muted">{a.package_name || '—'}</td>
                     <td className="cell-muted">{a.description || '—'}</td>
                     <td><span className="aam-tag green">{a.status ? 'Active' : 'Inactive'}</span></td>

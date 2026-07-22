@@ -9,7 +9,7 @@ import testCaseService from '../../services/testCaseService';
 import catalogService from '../../services/catalogService';
 import './AddTestCase.css';
 
-const TEST_TYPE_OPTIONS = ['Smoke', 'Regression', 'Functional', 'UI', 'Integration', 'Performance'];
+const TEST_TYPE_OPTIONS = ['Smoke', 'Regression', 'Functional(End-to-End)', 'Sanity', 'Re-test'];
 
 const EMPTY_FORM = {
   testcaseKey: '',
