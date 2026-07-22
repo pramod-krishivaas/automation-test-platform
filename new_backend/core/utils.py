@@ -310,46 +310,109 @@ def resolve_adb_path() -> str:
 ADB_PATH = resolve_adb_path()
 
 
-def elevate_adb_server() -> bool:
-    """
-    Restarts the adb server under elevated (admin) privileges.
-
-    Needed when the backend runs under a secondary/standard Windows account:
-    a non-elevated adb server often can't see USB devices. This is called
-    once at app startup (triggers a single UAC prompt) — after that, plain
-    'adb devices' calls just talk to this already-elevated server over TCP
-    and don't need admin rights themselves, so the 5s /device-status poll
-    from the frontend stays prompt-free.
-    """
-    try:
-        subprocess.run([ADB_PATH, "kill-server"], capture_output=True, text=True, timeout=5)
-    except Exception as e:
-        print(f"⚠️ adb kill-server skipped: {e}")
-
-    if os.name != "nt":
-        try:
-            subprocess.run([ADB_PATH, "start-server"], capture_output=True, text=True, timeout=10)
-            return True
-        except Exception as e:
-            print(f"❌ adb start-server failed: {e}")
-            return False
-
-    try:
-        ps_cmd = (
-            f"Start-Process -FilePath '{ADB_PATH}' -ArgumentList 'start-server' "
-            "-Verb RunAs -WindowStyle Hidden -Wait"
-        )
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode == 0:
-            print("✅ adb server started with elevated (admin) privileges")
-            return True
-        print(f"❌ Elevated adb start-server exited with code {result.returncode}: {result.stderr.strip()}")
+def _has_java(home: str) -> bool:
+    if not home:
         return False
+    exe = "java.exe" if os.name == "nt" else "java"
+    return os.path.isfile(os.path.join(home, "bin", exe))
+
+
+def resolve_java_home() -> str | None:
+    """
+    Resolve a usable JAVA_HOME (a JDK dir containing bin/java) without trusting the
+    ambient environment.
+
+    Appium's UiAutomator2 driver shells out to Java (apksigner) to verify the APK
+    signature; when the process that launched Appium has no JAVA_HOME and no java
+    on PATH — common under a secondary Windows account — it fails with
+    "java.exe could not be found neither in PATH nor under JAVA_HOME". Order:
+    existing JAVA_HOME -> java on PATH -> Android Studio's bundled JBR -> common
+    JDK install roots.
+    """
+    jh = os.environ.get("JAVA_HOME")
+    if _has_java(jh):
+        return jh
+
+    found = shutil.which("java")
+    if found:
+        # …/jbr/bin/java(.exe) -> …/jbr
+        home = os.path.dirname(os.path.dirname(found))
+        if _has_java(home):
+            return home
+
+    candidates: list[str] = []
+    if os.name == "nt":
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        lad = os.environ.get("LOCALAPPDATA", "")
+        candidates += [
+            os.path.join(pf, "Android", "Android Studio", "jbr"),
+            os.path.join(lad, "Programs", "Android Studio", "jbr"),
+        ]
+        for base in (os.path.join(pf, "Java"),
+                     os.path.join(pf, "Eclipse Adoptium"),
+                     os.path.join(pf, "Microsoft")):
+            if os.path.isdir(base):
+                for name in sorted(os.listdir(base), reverse=True):
+                    candidates.append(os.path.join(base, name))
+
+    for c in candidates:
+        if _has_java(c):
+            return c
+
+    return None
+
+
+JAVA_HOME = resolve_java_home()
+
+
+def _sdk_root_from_adb() -> str | None:
+    """Derive the Android SDK root from the resolved adb path (…/platform-tools/adb)."""
+    if ADB_PATH and os.path.basename(os.path.dirname(ADB_PATH)).lower() == "platform-tools":
+        return os.path.dirname(os.path.dirname(ADB_PATH))
+    return os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+
+
+def build_tool_env() -> dict:
+    """
+    Return an environment dict for launching Appium (and other Android tooling)
+    with JAVA_HOME, ANDROID_HOME and their bin dirs guaranteed on PATH — even when
+    the backend's own process was started without them (secondary Windows account,
+    or launched before Java/SDK were on PATH). Fixes the intermittent
+    "java.exe could not be found" and missing-adb errors from the Appium server.
+    """
+    env = os.environ.copy()
+    path_parts = [env.get("PATH", "")]
+
+    if JAVA_HOME:
+        env["JAVA_HOME"] = JAVA_HOME
+        path_parts.insert(0, os.path.join(JAVA_HOME, "bin"))
+
+    sdk_root = _sdk_root_from_adb()
+    if sdk_root and os.path.isdir(sdk_root):
+        env["ANDROID_HOME"] = sdk_root
+        env.setdefault("ANDROID_SDK_ROOT", sdk_root)
+        path_parts.insert(0, os.path.join(sdk_root, "platform-tools"))
+
+    env["PATH"] = os.pathsep.join(p for p in path_parts if p)
+    return env
+
+
+def ensure_adb_server() -> bool:
+    """
+    Make sure a (non-elevated) adb server is running so device detection works.
+
+    Runs entirely under the current user — no admin/UAC. adb only needs USB
+    driver access, which a standard account already has; elevating actually
+    breaks things by switching PATH/profile context away from the user's
+    npm/SDK installs. Called once at startup so the first /device-status poll
+    has a live server to query.
+    """
+    try:
+        subprocess.run([ADB_PATH, "start-server"], capture_output=True, text=True, timeout=10)
+        print(f"✅ adb server ready (adb={ADB_PATH})")
+        return True
     except Exception as e:
-        print(f"❌ adb elevation error: {e}")
+        print(f"❌ adb start-server failed (adb={ADB_PATH}): {e}")
         return False
 
 

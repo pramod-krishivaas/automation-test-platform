@@ -210,9 +210,10 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.aam-tag.blue  { background: var(--status-blue-bg);  color: var(--status-blue); }
-.aam-tag.green { background: var(--status-green-bg); color: var(--status-green); }
-.aam-tag.slate { background: var(--bg-input);        color: var(--text-secondary); }
+.aam-tag.blue   { background: var(--status-blue-bg);  color: var(--status-blue); }
+.aam-tag.green  { background: var(--status-green-bg); color: var(--status-green); }
+.aam-tag.slate  { background: var(--bg-input);        color: var(--text-secondary); }
+.aam-tag.purple { background: rgba(124, 58, 237, 0.12); color: var(--accent-purple); }
 
 /* ── Table ───────────────────────────────────────────────────────────────── */
 .aam-table-scroll { overflow-x: auto; }

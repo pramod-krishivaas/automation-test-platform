@@ -296,6 +296,10 @@ def run_tests_and_get_suggestions(
         pytest_args.append(f"--app-version={app_version}")
     if developer_name:
         pytest_args.append(f"--developer-name={developer_name}")
+    if app_type:
+        # Target automation role — consumed by the `target_role` fixture in
+        # conftest.py so shared login/switch logic knows which app to land on.
+        pytest_args.append(f"--target-role={app_type}")
 
     overall_ok = run_pytest_streaming_with_tracking(
         pytest_args,

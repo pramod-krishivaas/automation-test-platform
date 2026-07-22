@@ -52,8 +52,17 @@ def _extract_allure_title(decorator_list: list[ast.expr]) -> str | None:
 
 
 def discover_automation_tests(relative_path: str) -> list[dict]:
-    """Given a repo-relative .py path under tests/, return every ID-tagged,
-    currently-active test function as {id, title, function_name, line}."""
+    """Given a repo-relative .py path under tests/, return every currently-active,
+    pytest-collectable test function as {id, title, function_name, line}.
+
+    Every `test*` function is returned (so the source `def` name is always
+    available for DB matching / issue tracking), whether or not it carries an
+    @allure.title. When the title is of the form "ID -- description", `id` and a
+    cleaned `title` are split out; otherwise `id` is None and `title` is the raw
+    allure title (or "" when there is none). Matching to a DB testcase_key is done
+    by the caller on function_name (see TestScreen.jsx), which is robust to the
+    tc_/test_ prefix difference between the DB key and the pytest function name.
+    """
     absolute_path = _resolve_safe_path(relative_path)
     source = absolute_path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(absolute_path))
@@ -62,17 +71,22 @@ def discover_automation_tests(relative_path: str) -> list[dict]:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
+        # pytest's default collection prefix — mirror it so we list exactly what runs.
         if not node.name.startswith("test"):
             continue
-        title = _extract_allure_title(node.decorator_list)
-        if not title:
-            continue
-        match = _ID_PATTERN.match(title)
-        if not match:
-            continue
+
+        raw_title = _extract_allure_title(node.decorator_list)
+        tc_id: str | None = None
+        title = raw_title or ""
+        if raw_title:
+            match = _ID_PATTERN.match(raw_title)
+            if match:
+                tc_id = match.group(1).upper()
+                title = match.group(2).strip()
+
         results.append({
-            "id": match.group(1).upper(),
-            "title": match.group(2).strip(),
+            "id": tc_id,
+            "title": title,
             "function_name": node.name,
             "line": node.lineno,
         })

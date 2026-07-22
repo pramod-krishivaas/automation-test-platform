@@ -4,7 +4,7 @@ from new_backend.core.websocket import manager
 from new_backend.modules.api_testing.db_service import db
 from new_backend.core.logger import setup_logger
 from new_backend.core.state import state
-from new_backend.core.utils import elevate_adb_server
+from new_backend.core.utils import ensure_adb_server
 
 logger = setup_logger()
 
@@ -29,10 +29,10 @@ async def lifespan(app):
         logger.error(f"Database connection failed: {e}")
         raise
 
-    if await asyncio.to_thread(elevate_adb_server):
-        logger.info("✅ adb server elevated for device detection")
+    if await asyncio.to_thread(ensure_adb_server):
+        logger.info("✅ adb server ready for device detection")
     else:
-        logger.warning("⚠️ Could not elevate adb server; device detection may fail under secondary account")
+        logger.warning("⚠️ adb server could not be started; check that platform-tools is installed")
 
     yield
 

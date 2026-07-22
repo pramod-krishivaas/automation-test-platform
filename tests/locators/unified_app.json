@@ -1,0 +1,37 @@
+{
+  "login_screen": {
+    "next_button_language_login": "//android.view.ViewGroup[@content-desc=\"Next\"]",
+    "allow_picture_button": "//android.widget.Button[@resource-id=\"com.android.permissioncontroller:id/permission_allow_one_time_button\"]",
+    "allow_location_button": "//android.widget.Button[@resource-id=\"com.android.permissioncontroller:id/permission_allow_foreground_only_button\"]",
+    "allow_audio_button": "//android.widget.Button[@resource-id=\"com.android.permissioncontroller:id/permission_allow_foreground_only_button\"]",
+    "allow_notifications_button": "//android.widget.Button[@resource-id=\"com.android.permissioncontroller:id/permission_allow_button\"]",
+    "phone_number_input": "//android.widget.EditText[@content-desc=\"phone number input field, mandatory\"]",
+    "next_button_login": "//android.view.ViewGroup[@content-desc=\"Next\"]",
+    "signup_button_login": "//android.view.ViewGroup[@content-desc=\"Sign Up\"]",
+    "cross_icon_login": "//android.widget.TextView[@text=\"\"]",
+    "mpin_input": "//android.widget.EditText[@content-desc=\"MPIN input field, mandatory\"]",
+    "verify_button_login": "//android.widget.TextView[@text=\"Verify mPIN\"]",
+    "change_mobile_number": "//android.widget.TextView[@text=\"Change Mobile Number\"]",
+    "reset_mpin_button": "//android.widget.TextView[@text=\"Reset mPIN\"]",
+    "resend_otp_button": "//android.widget.TextView[@text=\"Resend OTP\"]",
+    "mpin_input_0": "//android.widget.EditText[@resource-id=\"otp_input_0\"]",
+    "mpin_input_1": "//android.widget.EditText[@resource-id=\"otp_input_1\"]",
+    "mpin_input_2": "//android.widget.EditText[@resource-id=\"otp_input_2\"]",
+    "mpin_input_3": "//android.widget.EditText[@resource-id=\"otp_input_3\"]"
+  },
+  "switch_control": {
+    "_note": "switch_toggle_button = the current-app chip on every home, matched by the dropdown glyph U+F222 so it works for ANY landed role. target_* = entries in the 'Switch App' menu (content-desc like 'Farmer - Regular, >'). Captured live 2026-07-22.",
+    "switch_toggle_button": "//android.view.ViewGroup[contains(@content-desc, \"\uf222\")]",
+    "target_regular_farmer": "//android.view.ViewGroup[contains(@content-desc, \"Farmer - Regular\")]",
+    "target_regular_client": "//android.view.ViewGroup[contains(@content-desc, \"Supervisor - Regular\")]",
+    "target_state_farmer": "//android.view.ViewGroup[contains(@content-desc, \"Farmer - State\")]",
+    "target_state_client": "//android.view.ViewGroup[contains(@content-desc, \"Supervisor - State\")]"
+  },
+  "home_markers": {
+    "_note": "Role-exclusive text on each home header chip. CONFIRMED live: regular_farmer='Farmer', state_farmer='State Farmer'. The client/supervisor home labels are not yet captured (fill when a client number is available).",
+    "regular_farmer": "//android.widget.TextView[@text=\"Farmer\"]",
+    "regular_client": "//android.widget.TextView[@text=\"Field Agent\"]",
+    "state_farmer": "//android.widget.TextView[@text=\"State Farmer\"]",
+    "state_client": "//android.widget.TextView[@text=\"Field Agent\"]"
+  }
+}

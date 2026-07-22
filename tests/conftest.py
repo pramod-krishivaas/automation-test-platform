@@ -363,6 +363,10 @@ def pytest_addoption(parser):
     parser.addoption("--app-name",       action="store", default="Unknown App")
     parser.addoption("--app-version",    action="store", default="Unknown Version")
     parser.addoption("--developer-name", action="store", default="")
+    # Target automation role chosen in the UI: regular_farmer | regular_client |
+    # state_farmer | state_client. Used by the shared login/switch flow to detect
+    # the landed app and switch to the intended one.
+    parser.addoption("--target-role",    action="store", default=None)
 
 
 def pytest_sessionstart(session):
@@ -423,6 +427,20 @@ def _wait_for_appium(host: str = "127.0.0.1", port: int = 4723,
         f"  → Start Appium first:  appium -p {port}\n"
         f"  → Or use the 'Start Server' button in the UI before running tests.\n"
     )
+
+
+# ── Target-role fixture ───────────────────────────────────────────────────────
+@pytest.fixture(scope="session")
+def target_role(request):
+    """
+    The automation role the UI asked us to test (regular_farmer | regular_client
+    | state_farmer | state_client), passed via --target-role. Because the unified
+    app redirects to a home screen by priority (state_client > state_farmer >
+    regular_farmer > regular_client), the shared login lands on whichever role the
+    number resolves to first; the switch step uses this value to reach the intended
+    app. Returns None when not supplied (tests should then skip the switch step).
+    """
+    return request.config.getoption("--target-role")
 
 
 # ── Driver fixture ────────────────────────────────────────────────────────────

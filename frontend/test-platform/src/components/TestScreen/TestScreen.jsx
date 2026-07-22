@@ -13,10 +13,10 @@ import '../../App.css';
 const WS_URL = 'ws://localhost:8000/ws/test-status';
 const API_URL = 'http://localhost:8000';
 
-// Links a DB Application's package_name to the automation framework's app
-// variant key below (APP_VARIANTS) — mirrors new_backend/modules/slack/config.py's
-// PACKAGE_VARIANT_MAP. Kept as a separate frontend copy since APP_VARIANTS itself
-// (the real, validated-at-runtime automation file registry) already lives here.
+// LEGACY fallback only. Since the unified app's four roles share one package_name,
+// the authoritative UI→variant key is now the Application's `variant` field (see
+// resolvedVariant below). This map is consulted only for older DB rows that were
+// created before the variant column existed. New rows should set `variant` directly.
 const PACKAGE_VARIANT_MAP = {
     "com.agribride.krishivaas.farmer_app": "regular_farmer",
     "com.agribride.krishivaas.client_app": "regular_client",
@@ -32,10 +32,10 @@ const APP_VARIANTS = {
         label: "Krishivaas Farmer (Regular)",
         modules: [
             { name: 'Login', path: 'tests/test_cases/regular_farmer_test_cases/test_login_pytest.py' },
-            { name: 'Crophealth', path: 'tests/test_cases/regular_farmer_test_cases/test_crop_health_pytest.py' },
-            { name: 'Farmer Updates ', path: 'tests/test_cases/regular_farmer_test_cases/test_farmer_updates.py' },
-            { name: 'Diagnosis Updates', path: 'tests/test_cases/regular_farmer_test_cases/test_diagnosis_updates.py' },
-            { name: 'Onboarding', path: 'tests/test_cases/regular_farmer_test_cases/test_onboarding_pytest.py' },
+            // { name: 'Crophealth', path: 'tests/test_cases/regular_farmer_test_cases/test_crop_health_pytest.py' },
+            // { name: 'Farmer Updates ', path: 'tests/test_cases/regular_farmer_test_cases/test_farmer_updates.py' },
+            // { name: 'Diagnosis Updates', path: 'tests/test_cases/regular_farmer_test_cases/test_diagnosis_updates.py' },
+            // { name: 'Onboarding', path: 'tests/test_cases/regular_farmer_test_cases/test_onboarding_pytest.py' },
         ]
     },
     CLIENT: {
@@ -125,6 +125,12 @@ const ModuleFlow = ({ modules, isRunning, onToggleModule }) => (
  * ─────────────────────────────────────────────────────────────────────────── */
 const normalizeTestId = (s) => (s || '').trim().toUpperCase();
 
+// Normalize a DB testcase_key or a source function name to a common key so they
+// match despite the tc_/test_ prefix difference (pytest requires test_*, while the
+// catalogued key may be tc_*). e.g. "tc_loginpos_001" and "test_loginpos_001"
+// both normalize to "loginpos_001".
+const normalizeFuncKey = (s) => (s || '').trim().toLowerCase().replace(/^(tc|test)_/, '');
+
 const ReadyTestCases = ({ modules }) => {
     const [dbByModule, setDbByModule] = useState({});
     const [sourceByModule, setSourceByModule] = useState({});
@@ -173,45 +179,58 @@ const ReadyTestCases = ({ modules }) => {
                     {selectedMatched.map((m) => {
                         const dbCases = dbByModule[m.name] || [];
                         const sourceCases = sourceByModule[m.name] || [];
-                        const sourceById = new Map(sourceCases.map((s) => [normalizeTestId(s.id), s]));
-                        const dbByKey = new Map(dbCases.map((tc) => [normalizeTestId(tc.testcase_key), tc]));
-                        const allIds = new Set([...sourceById.keys(), ...dbByKey.keys()]);
-                        const rows = Array.from(allIds)
-                            .map((id) => {
-                                const db = dbByKey.get(id);
-                                const src = sourceById.get(id);
-                                return { id, title: db?.title || src?.title || '', inDb: !!db, inSource: !!src };
+                        // Match a DB test case to its source function by normalized name
+                        // (testcase_key <-> def name). This is the link the issue report
+                        // uses: a failure's test_name (the function) maps straight back to
+                        // the catalogued testcase_key.
+                        const sourceByFunc = new Map(sourceCases.map((s) => [normalizeFuncKey(s.function_name), s]));
+                        const dbByFunc = new Map(dbCases.map((tc) => [normalizeFuncKey(tc.testcase_key), tc]));
+                        const allKeys = new Set([...sourceByFunc.keys(), ...dbByFunc.keys()]);
+                        const rows = Array.from(allKeys)
+                            .map((k) => {
+                                const db = dbByFunc.get(k);
+                                const src = sourceByFunc.get(k);
+                                return {
+                                    key: k,
+                                    testcaseKey: db?.testcase_key || null,
+                                    functionName: src?.function_name || null,
+                                    line: src?.line || null,
+                                    title: db?.title || src?.title || '',
+                                    inDb: !!db,
+                                    inSource: !!src,
+                                };
                             })
-                            .sort((a, b) => a.id.localeCompare(b.id));
-
-                        const noIdTagging = sourceCases.length === 0;
+                            .sort((a, b) => (a.testcaseKey || a.functionName || '').localeCompare(b.testcaseKey || b.functionName || ''));
 
                         return (
                             <div key={m.dbModuleId}>
                                 <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
                                     {m.name}
                                 </div>
-                                {noIdTagging ? (
+                                {rows.length === 0 ? (
                                     <div style={{ fontSize: '0.76rem', color: '#94A3B8', fontStyle: 'italic' }}>
-                                        No test IDs found in source — add <code>@allure.title("ID -- ...")</code> to enable per-test-case matching.
+                                        No test cases catalogued or no <code>test_*</code> functions found in the source file.
                                     </div>
-                                ) : rows.length === 0 ? (
-                                    <div style={{ fontSize: '0.76rem', color: '#94A3B8' }}>No test cases catalogued yet.</div>
                                 ) : (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                                         {rows.map((r) => (
-                                            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem' }}>
-                                                <span style={{ fontFamily: 'monospace', color: '#2563EB', fontWeight: 600, flexShrink: 0 }}>
-                                                    {r.id}
+                                            <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', flexWrap: 'wrap' }}>
+                                                <span style={{ fontFamily: 'monospace', color: '#2563EB', fontWeight: 600, flexShrink: 0 }}
+                                                    title="DB testcase_key">
+                                                    {r.testcaseKey || '—'}
                                                 </span>
-                                                <span style={{ color: '#334155', flex: 1 }}>{r.title}</span>
+                                                <span style={{ color: '#334155', flex: 1, minWidth: '120px' }}>{r.title}</span>
+                                                <span style={{ fontFamily: 'monospace', color: '#7C3AED', fontSize: '0.72rem', flexShrink: 0 }}
+                                                    title={r.line ? `Source function (line ${r.line})` : 'Source function'}>
+                                                    {r.functionName ? `def ${r.functionName}()` : '—'}
+                                                </span>
                                                 <span style={{
                                                     fontSize: '0.62rem', fontWeight: 700, padding: '2px 7px', borderRadius: '999px',
                                                     flexShrink: 0,
-                                                    color: r.inDb && r.inSource ? '#16A34A' : '#94A3B8',
-                                                    background: r.inDb && r.inSource ? '#DCFCE7' : '#F1F5F9',
+                                                    color: r.inDb && r.inSource ? '#16A34A' : '#B45309',
+                                                    background: r.inDb && r.inSource ? '#DCFCE7' : '#FEF3C7',
                                                 }}>
-                                                    {r.inDb && r.inSource ? 'Matched' : r.inDb ? 'DB only' : 'Source only'}
+                                                    {r.inDb && r.inSource ? 'Matched' : r.inDb ? 'DB only (no def)' : 'Source only (not catalogued)'}
                                                 </span>
                                             </div>
                                         ))}
@@ -477,8 +496,15 @@ function TestScreen({ onHistoryUpdate }) {
 
     const selectedDbApp = dbApplications.find((a) => a.application_id === selectedAppKey) || null;
 
-    const resolvedVariant = selectedDbApp?.package_name
-        ? Object.values(APP_VARIANTS).find((v) => v.id === PACKAGE_VARIANT_MAP[selectedDbApp.package_name]) || null
+    // Resolve the automation variant from the app's explicit `variant` field.
+    // The unified app's four roles (regular_farmer / regular_client / state_farmer
+    // / state_client) all share ONE package_name, so package_name can no longer
+    // tell them apart — `variant` is the authoritative key. Fall back to the legacy
+    // package map only for older rows that predate the variant column.
+    const resolvedVariantId = selectedDbApp?.variant
+        || (selectedDbApp?.package_name ? PACKAGE_VARIANT_MAP[selectedDbApp.package_name] : null);
+    const resolvedVariant = resolvedVariantId
+        ? Object.values(APP_VARIANTS).find((v) => v.id === resolvedVariantId) || null
         : null;
 
     // Union of automation-file modules and DB modules, matched by normalized name.

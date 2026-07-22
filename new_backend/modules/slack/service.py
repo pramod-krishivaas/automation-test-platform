@@ -484,6 +484,7 @@ async def post_run_notify(
     app_version:    str,
     developer_name: str,
     channel_id:     str,
+    app_type:       str = None,
 ) -> None:
     loop = asyncio.get_event_loop()
 
@@ -536,6 +537,7 @@ async def post_run_notify(
             lambda: run_tests_and_get_suggestions(
                 apk_path,
                 tests_to_run=tests_to_run,
+                app_type=app_type,
                 app_name=app_name,
                 app_version=app_version,
                 developer_name=developer_name,
