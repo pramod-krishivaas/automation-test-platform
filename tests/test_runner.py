@@ -74,13 +74,24 @@ def generate_report(project_root: Optional[str] = None) -> None:
     elif shutil.which("allure.cmd"):
         allure_cmd = "allure.cmd"
 
+    # Allure is a JVM tool. The backend process may have no JAVA_HOME / java on PATH
+    # (secondary Windows account), so `allure generate` exits 9009 ("command not
+    # found" — it's java that's missing). Inject the same Java/Android-aware env we
+    # use for Appium so allure can find java.
+    try:
+        from new_backend.core.utils import build_tool_env
+        env = build_tool_env()
+    except Exception:
+        env = os.environ.copy()
+
     try:
         send_log("Generating Allure HTML report...", "INFO")
         subprocess.run(
             [allure_cmd, "generate", RESULTS_DIR, "-o", REPORT_DIR, "--clean"],
             cwd=project_root,
             check=True,
-            shell=True
+            shell=True,
+            env=env,
         )
         send_log("Allure HTML report generated.", "SUCCESS")
 
@@ -90,7 +101,8 @@ def generate_report(project_root: Optional[str] = None) -> None:
             cwd=project_root,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            shell=True
+            shell=True,
+            env=env,
         )
     except Exception as e:
         send_log(f"Failed to generate/open report: {e}", "FAILED")
@@ -218,7 +230,9 @@ def run_tests_and_get_suggestions(
     app_name: Optional[str] = None,
     app_version: Optional[str] = None,
     developer_name: Optional[str] = None,
-    run_id=None 
+    run_id=None,
+    login_phone: Optional[str] = None,
+    login_mpin: Optional[str] = None,
 ) -> None:
     """
     Runs all tests in a single session to keep the app open,
@@ -300,6 +314,11 @@ def run_tests_and_get_suggestions(
         # Target automation role — consumed by the `target_role` fixture in
         # conftest.py so shared login/switch logic knows which app to land on.
         pytest_args.append(f"--target-role={app_type}")
+    if login_phone:
+        # Mobile number to log in with (from the UI); overrides accounts.json.
+        pytest_args.append(f"--login-phone={login_phone}")
+    if login_mpin:
+        pytest_args.append(f"--login-mpin={login_mpin}")
 
     overall_ok = run_pytest_streaming_with_tracking(
         pytest_args,

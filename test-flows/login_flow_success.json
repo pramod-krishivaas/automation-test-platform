@@ -22,18 +22,22 @@
     {
         "step": "Enter phone number",
         "status": "Success",
-        "value": "7660852538"
+        "value": "9618574550"
     },
     {
         "step": "Click Next after phone number",
         "status": "Success"
     },
     {
-        "step": "Enter MPIN digits",
+        "step": "Submit MPIN",
         "status": "Success"
     },
     {
-        "step": "Submit MPIN",
+        "step": "Switched to target app 'Regular Farmer'",
+        "status": "Success"
+    },
+    {
+        "step": "Verified on target app 'Regular Farmer'",
         "status": "Success"
     }
 ]

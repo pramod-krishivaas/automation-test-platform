@@ -6,7 +6,7 @@ Prefix ("/api") is applied once at inclusion time in new_backend/main.py,
 matching every other router there.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from new_backend.modules.test_management import models as schemas
@@ -28,17 +28,17 @@ def list_applications(status: bool | None = None, q: str | None = None, page: in
 
 
 @router.get("/applications/{application_id}", response_model=schemas.ApplicationRead)
-def get_application(application_id: str, db: Session = Depends(get_db)):
+def get_application(application_id: int, db: Session = Depends(get_db)):
     return service.get_application_flow(application_id, db)
 
 
 @router.put("/applications/{application_id}", response_model=schemas.ApplicationRead)
-def update_application(application_id: str, payload: schemas.ApplicationUpdate, db: Session = Depends(get_db)):
+def update_application(application_id: int, payload: schemas.ApplicationUpdate, db: Session = Depends(get_db)):
     return service.update_application_flow(application_id, payload, db)
 
 
 @router.delete("/applications/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_application(application_id: str, db: Session = Depends(get_db)):
+def delete_application(application_id: int, db: Session = Depends(get_db)):
     service.delete_application_flow(application_id, db)
 
 
@@ -49,22 +49,22 @@ def create_module(payload: schemas.ModuleCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/modules", response_model=schemas.PaginatedResponse[schemas.ModuleRead])
-def list_modules(application_id: str | None = None, status: bool | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_modules(application_id: int | None = None, status: bool | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     return service.list_modules_flow(application_id, status, page, page_size, db)
 
 
 @router.get("/modules/{module_id}", response_model=schemas.ModuleRead)
-def get_module(module_id: str, db: Session = Depends(get_db)):
+def get_module(module_id: int, db: Session = Depends(get_db)):
     return service.get_module_flow(module_id, db)
 
 
 @router.put("/modules/{module_id}", response_model=schemas.ModuleRead)
-def update_module(module_id: str, payload: schemas.ModuleUpdate, db: Session = Depends(get_db)):
+def update_module(module_id: int, payload: schemas.ModuleUpdate, db: Session = Depends(get_db)):
     return service.update_module_flow(module_id, payload, db)
 
 
 @router.delete("/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_module(module_id: str, db: Session = Depends(get_db)):
+def delete_module(module_id: int, db: Session = Depends(get_db)):
     service.delete_module_flow(module_id, db)
 
 
@@ -80,17 +80,17 @@ def list_priorities(page: int = 1, page_size: int = 20, db: Session = Depends(ge
 
 
 @router.get("/priorities/{priority_id}", response_model=schemas.PriorityRead)
-def get_priority(priority_id: str, db: Session = Depends(get_db)):
+def get_priority(priority_id: int, db: Session = Depends(get_db)):
     return service.get_priority_flow(priority_id, db)
 
 
 @router.put("/priorities/{priority_id}", response_model=schemas.PriorityRead)
-def update_priority(priority_id: str, payload: schemas.PriorityUpdate, db: Session = Depends(get_db)):
+def update_priority(priority_id: int, payload: schemas.PriorityUpdate, db: Session = Depends(get_db)):
     return service.update_priority_flow(priority_id, payload, db)
 
 
 @router.delete("/priorities/{priority_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_priority(priority_id: str, db: Session = Depends(get_db)):
+def delete_priority(priority_id: int, db: Session = Depends(get_db)):
     service.delete_priority_flow(priority_id, db)
 
 
@@ -100,11 +100,32 @@ def create_test_case(payload: schemas.TestCaseCreate, db: Session = Depends(get_
     return service.create_test_case_flow(payload, db)
 
 
+@router.post("/test-cases/bulk-upload", response_model=schemas.BulkUploadResult)
+async def bulk_upload_test_cases(
+    application_id: int = Form(...),
+    module_id: int = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    content = await file.read()
+    return service.bulk_upload_test_cases_flow(content, file.filename, application_id, module_id, db)
+
+
+@router.get("/test-cases/bulk-template")
+def download_bulk_template():
+    data = service.build_bulk_template_xlsx()
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="test_cases_bulk_template.xlsx"'},
+    )
+
+
 @router.get("/test-cases", response_model=schemas.PaginatedResponse[schemas.TestCaseRead])
 def list_test_cases(
-    application_id: str | None = None,
-    module_id: str | None = None,
-    priority_id: str | None = None,
+    application_id: int | None = None,
+    module_id: int | None = None,
+    priority_id: int | None = None,
     test_type: str | None = None,
     status: bool | None = None,
     polarity: str | None = None,
@@ -117,17 +138,17 @@ def list_test_cases(
 
 
 @router.get("/test-cases/{testcase_id}", response_model=schemas.TestCaseRead)
-def get_test_case(testcase_id: str, db: Session = Depends(get_db)):
+def get_test_case(testcase_id: int, db: Session = Depends(get_db)):
     return service.get_test_case_flow(testcase_id, db)
 
 
 @router.put("/test-cases/{testcase_id}", response_model=schemas.TestCaseRead)
-def update_test_case(testcase_id: str, payload: schemas.TestCaseUpdate, db: Session = Depends(get_db)):
+def update_test_case(testcase_id: int, payload: schemas.TestCaseUpdate, db: Session = Depends(get_db)):
     return service.update_test_case_flow(testcase_id, payload, db)
 
 
 @router.delete("/test-cases/{testcase_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_test_case(testcase_id: str, db: Session = Depends(get_db)):
+def delete_test_case(testcase_id: int, db: Session = Depends(get_db)):
     service.delete_test_case_flow(testcase_id, db)
 
 
@@ -144,17 +165,33 @@ def run_tests(payload: schemas.TestRunCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/test-runs", response_model=schemas.PaginatedResponse[schemas.TestRunRead])
-def list_test_runs(application_id: str | None = None, module_id: str | None = None, status: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_test_runs(application_id: int | None = None, module_id: int | None = None, status: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     return service.list_test_runs_flow(application_id, module_id, status, page, page_size, db)
 
 
+# ── Live pytest run reporting (real Appium runs) ──────────────────────────
+@router.post("/test-runs/start", response_model=schemas.TestRunRead, status_code=status.HTTP_201_CREATED)
+def start_pytest_run(payload: schemas.PytestRunStart, db: Session = Depends(get_db)):
+    return service.start_pytest_run_flow(payload, db)
+
+
+@router.post("/test-runs/{run_id}/result", response_model=schemas.TestRunResultRead, status_code=status.HTTP_201_CREATED)
+def record_pytest_result(run_id: int, payload: schemas.PytestResultRecord, db: Session = Depends(get_db)):
+    return service.record_pytest_result_flow(run_id, payload, db)
+
+
+@router.post("/test-runs/{run_id}/finish", response_model=schemas.TestRunRead)
+def finish_pytest_run(run_id: int, payload: schemas.PytestRunFinish, db: Session = Depends(get_db)):
+    return service.finish_pytest_run_flow(run_id, payload, db)
+
+
 @router.get("/test-runs/{run_id}", response_model=schemas.TestRunDetailRead)
-def get_test_run(run_id: str, db: Session = Depends(get_db)):
+def get_test_run(run_id: int, db: Session = Depends(get_db)):
     return service.get_test_run_flow(run_id, db)
 
 
 @router.post("/test-runs/{run_id}/cancel", response_model=schemas.TestRunRead)
-def cancel_test_run(run_id: str, db: Session = Depends(get_db)):
+def cancel_test_run(run_id: int, db: Session = Depends(get_db)):
     return service.cancel_test_run_flow(run_id, db)
 
 
@@ -165,22 +202,22 @@ def create_test_run_result(payload: schemas.TestRunResultCreate, db: Session = D
 
 
 @router.get("/test-run-results", response_model=schemas.PaginatedResponse[schemas.TestRunResultRead])
-def list_test_run_results(run_id: str | None = None, testcase_id: str | None = None, status: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_test_run_results(run_id: int | None = None, testcase_id: int | None = None, status: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     return service.list_test_run_results_flow(run_id, testcase_id, status, page, page_size, db)
 
 
 @router.get("/test-run-results/{execution_id}", response_model=schemas.TestRunResultRead)
-def get_test_run_result(execution_id: str, db: Session = Depends(get_db)):
+def get_test_run_result(execution_id: int, db: Session = Depends(get_db)):
     return service.get_test_run_result_flow(execution_id, db)
 
 
 @router.put("/test-run-results/{execution_id}", response_model=schemas.TestRunResultRead)
-def update_test_run_result(execution_id: str, payload: schemas.TestRunResultUpdate, db: Session = Depends(get_db)):
+def update_test_run_result(execution_id: int, payload: schemas.TestRunResultUpdate, db: Session = Depends(get_db)):
     return service.update_test_run_result_flow(execution_id, payload, db)
 
 
 @router.delete("/test-run-results/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_test_run_result(execution_id: str, db: Session = Depends(get_db)):
+def delete_test_run_result(execution_id: int, db: Session = Depends(get_db)):
     service.delete_test_run_result_flow(execution_id, db)
 
 
@@ -191,7 +228,7 @@ def create_execution_logs(payload: schemas.ExecutionLogBulkCreate, db: Session =
 
 
 @router.get("/execution-logs", response_model=list[schemas.ExecutionLogRead])
-def list_execution_logs(execution_id: str, db: Session = Depends(get_db)):
+def list_execution_logs(execution_id: int, db: Session = Depends(get_db)):
     return service.list_execution_logs_flow(execution_id, db)
 
 
@@ -202,22 +239,22 @@ def create_attachment(payload: schemas.AttachmentCreate, db: Session = Depends(g
 
 
 @router.get("/attachments", response_model=schemas.PaginatedResponse[schemas.AttachmentRead])
-def list_attachments(execution_id: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_attachments(execution_id: int | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     return service.list_attachments_flow(execution_id, page, page_size, db)
 
 
 @router.get("/attachments/{attachment_id}", response_model=schemas.AttachmentRead)
-def get_attachment(attachment_id: str, db: Session = Depends(get_db)):
+def get_attachment(attachment_id: int, db: Session = Depends(get_db)):
     return service.get_attachment_flow(attachment_id, db)
 
 
 @router.put("/attachments/{attachment_id}", response_model=schemas.AttachmentRead)
-def update_attachment(attachment_id: str, payload: schemas.AttachmentUpdate, db: Session = Depends(get_db)):
+def update_attachment(attachment_id: int, payload: schemas.AttachmentUpdate, db: Session = Depends(get_db)):
     return service.update_attachment_flow(attachment_id, payload, db)
 
 
 @router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_attachment(attachment_id: str, db: Session = Depends(get_db)):
+def delete_attachment(attachment_id: int, db: Session = Depends(get_db)):
     service.delete_attachment_flow(attachment_id, db)
 
 
@@ -228,12 +265,12 @@ def create_bug(payload: schemas.BugCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/bugs", response_model=schemas.PaginatedResponse[schemas.BugRead])
-def list_bugs(testcase_id: str | None = None, execution_id: str | None = None, status: str | None = None, severity: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_bugs(testcase_id: int | None = None, execution_id: int | None = None, status: str | None = None, severity: str | None = None, page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     return service.list_bugs_flow(testcase_id, execution_id, status, severity, page, page_size, db)
 
 
 @router.get("/bugs/{bug_id}", response_model=schemas.BugRead)
-def get_bug(bug_id: str, db: Session = Depends(get_db)):
+def get_bug(bug_id: int, db: Session = Depends(get_db)):
     return service.get_bug_flow(bug_id, db)
 
 

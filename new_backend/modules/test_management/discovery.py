@@ -22,6 +22,18 @@ _TESTS_DIR = _REPO_ROOT / "tests"
 
 _ID_PATTERN = re.compile(r"^\s*([A-Za-z]{1,4}_\d{2,4})\s*--?\s*(.*)$")
 
+# Leading pytest/catalog prefix stripped when matching a source function name to a
+# DB testcase_key. MUST stay in lockstep with the frontend's `normalizeFuncKey`
+# (TestScreen.jsx). Example: source `test_LOGINPOS_TC_029` and sheet/DB key
+# `LOGINPOS_TC_029` both reduce to `loginpos_tc_029` and therefore match — the
+# author writes `test_` (pytest requires it) while the catalogued ID omits it.
+_MATCH_PREFIX = re.compile(r"^(tc|test)_")
+
+
+def normalize_match_key(name: str) -> str:
+    """Reduce a testcase_key or a source `def` name to a common comparison key."""
+    return _MATCH_PREFIX.sub("", (name or "").strip().lower())
+
 
 def _resolve_safe_path(relative_path: str) -> Path:
     """Resolve a repo-relative path, rejecting anything outside tests/."""
@@ -89,5 +101,7 @@ def discover_automation_tests(relative_path: str) -> list[dict]:
             "title": title,
             "function_name": node.name,
             "line": node.lineno,
+            # Key for matching to a DB testcase_key (tc_/test_ prefix stripped).
+            "match_key": normalize_match_key(node.name),
         })
     return results

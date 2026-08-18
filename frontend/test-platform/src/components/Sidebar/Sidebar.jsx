@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Play, History, ChevronLeft, ChevronRight, LayoutDashboard, Zap, FileJson, FilePlus2, AppWindow, ListChecks } from 'lucide-react';
+import { Play, History, ChevronLeft, ChevronRight, LayoutDashboard, FileJson, FilePlus2, AppWindow, ListChecks, Sun, Moon } from 'lucide-react';
 
 const NAV_ITEMS = [
     { label: 'Run Tests',       to: '/',                icon: <Play size={18} /> },
@@ -12,30 +12,49 @@ const NAV_ITEMS = [
     { label: 'Jira History',    to: '/jira-history',     icon: <History size={18} /> },
 ];
 
+// Apply the persisted theme as early as possible (module load) to avoid a flash.
+const getInitialTheme = () => {
+    try {
+        const saved = localStorage.getItem('theme');
+        if (saved === 'dark' || saved === 'light') return saved;
+        return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch {
+        return 'light';
+    }
+};
+
 export default function Sidebar() {
     const [collapsed, setCollapsed] = useState(false);
+    const [theme, setTheme] = useState(getInitialTheme);
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        try { localStorage.setItem('theme', theme); } catch { /* ignore */ }
+    }, [theme]);
+
+    const isDark = theme === 'dark';
 
     return (
         <aside style={{
             width: collapsed ? '60px' : '210px',
             height: '100vh',
-            background: '#FFFFFF',
-            borderRight: '1px solid #E2E8F0',
+            background: 'var(--bg-sidebar)',
+            borderRight: '1px solid var(--border-color)',
             display: 'flex',
             flexDirection: 'column',
             transition: 'width 0.22s ease',
             overflow: 'hidden',
             flexShrink: 0,
-            boxShadow: '1px 0 4px rgba(15,23,42,0.04)',
+            boxShadow: 'var(--shadow-xs)',
         }}>
 
-            {/* ── Brand ── */}
+            {/* ── Brand + theme toggle ── */}
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                padding: collapsed ? '18px 0' : '18px 16px 16px',
-                borderBottom: '1px solid #E2E8F0',
+                padding: collapsed ? '18px 0' : '18px 12px 16px 16px',
+                borderBottom: '1px solid var(--border-color)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 justifyContent: collapsed ? 'center' : 'flex-start',
@@ -51,9 +70,9 @@ export default function Sidebar() {
                     <LayoutDashboard size={17} color="#fff" />
                 </div>
                 {!collapsed && (
-                    <div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{
-                            color: '#0F172A',
+                            color: 'var(--text-primary)',
                             fontWeight: 800,
                             fontSize: '13.5px',
                             letterSpacing: '-0.01em',
@@ -62,7 +81,7 @@ export default function Sidebar() {
                             TAP / Android
                         </div>
                         <div style={{
-                            color: '#94A3B8',
+                            color: 'var(--text-muted)',
                             fontSize: '10px',
                             marginTop: '2px',
                             lineHeight: '1.35',
@@ -70,6 +89,27 @@ export default function Sidebar() {
                             Test Automation Platform
                         </div>
                     </div>
+                )}
+                {!collapsed && (
+                    <button
+                        onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+                        title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+                        aria-label="Toggle color theme"
+                        style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: '30px', height: '30px', flexShrink: 0,
+                            background: 'var(--bg-input)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            transition: 'color 0.15s, background 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-blue)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                    >
+                        {isDark ? <Sun size={16} /> : <Moon size={16} />}
+                    </button>
                 )}
             </div>
 
@@ -88,26 +128,26 @@ export default function Sidebar() {
                             justifyContent: collapsed ? 'center' : 'flex-start',
                             borderRadius: '8px',
                             textDecoration: 'none',
-                            color: isActive ? '#2563EB' : '#64748B',
-                            background: isActive ? '#EFF6FF' : 'transparent',
+                            color: isActive ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                            background: isActive ? 'var(--accent-blue-light)' : 'transparent',
                             fontWeight: isActive ? 700 : 500,
                             fontSize: '13px',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             transition: 'background 0.15s, color 0.15s',
-                            borderLeft: isActive ? '3px solid #2563EB' : '3px solid transparent',
+                            borderLeft: isActive ? '3px solid var(--accent-blue)' : '3px solid transparent',
                         })}
                         onMouseEnter={e => {
-                            // Only style non-active items on hover
-                            if (e.currentTarget.style.background !== 'rgb(239, 246, 255)') {
-                                e.currentTarget.style.background = '#F8FAFC';
-                                e.currentTarget.style.color = '#0F172A';
+                            // Leave the active item styled; only hover the inactive ones.
+                            if (e.currentTarget.getAttribute('aria-current') !== 'page') {
+                                e.currentTarget.style.background = 'var(--bg-input)';
+                                e.currentTarget.style.color = 'var(--text-primary)';
                             }
                         }}
                         onMouseLeave={e => {
-                            if (e.currentTarget.style.background !== 'rgb(239, 246, 255)') {
+                            if (e.currentTarget.getAttribute('aria-current') !== 'page') {
                                 e.currentTarget.style.background = 'transparent';
-                                e.currentTarget.style.color = '#64748B';
+                                e.currentTarget.style.color = 'var(--text-secondary)';
                             }
                         }}
                     >
@@ -117,7 +157,22 @@ export default function Sidebar() {
                 ))}
             </nav>
 
-            {/* ── Collapse Toggle ── */}
+            {/* ── Footer: theme (when collapsed) + collapse toggle ── */}
+            {collapsed && (
+                <button
+                    onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+                    title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+                    aria-label="Toggle color theme"
+                    style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '10px 0', background: 'none', border: 'none',
+                        borderTop: '1px solid var(--border-color)',
+                        color: 'var(--text-muted)', cursor: 'pointer',
+                    }}
+                >
+                    {isDark ? <Sun size={16} /> : <Moon size={16} />}
+                </button>
+            )}
             <button
                 onClick={() => setCollapsed(c => !c)}
                 title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -129,16 +184,16 @@ export default function Sidebar() {
                     padding: '12px 16px',
                     background: 'none',
                     border: 'none',
-                    borderTop: '1px solid #E2E8F0',
-                    color: '#94A3B8',
+                    borderTop: '1px solid var(--border-color)',
+                    color: 'var(--text-muted)',
                     cursor: 'pointer',
                     fontSize: '12px',
                     fontFamily: 'inherit',
                     whiteSpace: 'nowrap',
                     transition: 'color 0.15s',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.color = '#475569'; }}
-                onMouseLeave={e => { e.currentTarget.style.color = '#94A3B8'; }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
             >
                 {collapsed ? <ChevronRight size={16} /> : (
                     <>

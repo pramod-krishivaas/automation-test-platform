@@ -36,9 +36,10 @@ ROLE_PRIORITY = ["state_farmer", "regular_farmer", "state_client", "regular_clie
 
 ROLE_LABELS = {
     "state_client":   "Telangana Client",
-    "state_farmer":   "Telangana Farmer",
+    "state_farmer":   "Telangana Farmerrrrrrrrrrrr",
     "regular_farmer": "Regular Farmer",
-    "regular_client": "Regular Client",
+    # "regular_client": "Administrator, \uf222"
+    "regular_client": "Field Agent",
 }
 
 
@@ -88,11 +89,11 @@ def detect_landed_app(driver, obj, timeout=10, probe_timeout=2):
         for role in ROLE_PRIORITY:
             xp = configured.get(role)
             if xp and _element_present(driver, xp, timeout=probe_timeout):
-                print(f"[switch] Landed app detected → {role} ({ROLE_LABELS.get(role, role)})")
+                print(f"[switch] Landed app detected → {role} - {configured.get(role)} - ({ROLE_LABELS.get(role, role)})")
                 return role
         time.sleep(1)
 
-    print(f"[switch] Could not detect landed app within {timeout}s.")
+    print(f"[switch] Could not detect landed app within {role} - {configured.get(role)} - {ROLE_LABELS.get(role, role)} {timeout}s.")
     return None
 
 

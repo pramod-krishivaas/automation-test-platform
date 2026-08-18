@@ -29,7 +29,7 @@
   },
   "home_markers": {
     "_note": "Role-exclusive text on each home header chip. CONFIRMED live: regular_farmer='Farmer', state_farmer='State Farmer'. The client/supervisor home labels are not yet captured (fill when a client number is available).",
-    "regular_farmer": "//android.widget.TextView[@text=\"Farmer\"]",
+    "regular_farmer": "//android.widget.TextView[@text=\" Farmer\"]",
     "regular_client": "//android.widget.TextView[@text=\"Field Agent\"]",
     "state_farmer": "//android.widget.TextView[@text=\"State Farmer\"]",
     "state_client": "//android.widget.TextView[@text=\"Field Agent\"]"

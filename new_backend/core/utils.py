@@ -271,6 +271,7 @@ def start_allure_server() -> str:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             shell=True,
+            env=build_tool_env(),  # allure needs java on PATH / JAVA_HOME
         )
         time.sleep(2)
         return f"http://127.0.0.1:{_allure_port}"

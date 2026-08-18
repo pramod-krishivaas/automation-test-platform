@@ -426,6 +426,8 @@ async def start_test_flow(request, background_tasks, manager):
             developer_name=developer_name,
             channel_id=SLACK_NOTIFY_CHANNEL,
             app_type=app_variant,
+            login_phone=getattr(request, "login_phone", None),
+            login_mpin=getattr(request, "login_mpin", None),
         )
 
         return {
@@ -541,6 +543,8 @@ async def start_test_existing_flow(request, background_tasks, manager):
             # Prefer the role explicitly chosen in the UI; fall back to the
             # package-detected variant only if the UI didn't send one.
             app_type=getattr(request, "app_type", None) or app_variant,
+            login_phone=getattr(request, "login_phone", None),
+            login_mpin=getattr(request, "login_mpin", None),
         )
 
 
@@ -580,7 +584,8 @@ def stop_test_flow(manager):
 async def allure_start_flow():
     port = pick_free_port()
     subprocess.Popen([ALLURE_CMD, "open", "-h", "127.0.0.1", "-p", str(port), ALLURE_REPORT_DIR],
-                     cwd=BASE_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+                     cwd=BASE_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True,
+                     env=build_tool_env())  # allure needs java on PATH / JAVA_HOME
     return JSONResponse({"url": f"http://127.0.0.1:{port}"})
 
 async def run_complete_flow(event):

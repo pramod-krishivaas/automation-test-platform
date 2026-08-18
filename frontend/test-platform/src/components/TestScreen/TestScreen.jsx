@@ -26,12 +26,17 @@ const PACKAGE_VARIANT_MAP = {
 
 const normalizeModuleName = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+// Login is identical for all four apps, so every app's "Login" module maps to this
+// single shared test. It reads the selected app (via --target-role), logs in, and
+// switches to that app. Lives outside the per-app folders (common_test_cases).
+const COMMON_LOGIN = 'tests/test_cases/common_test_cases/test_login_pytest.py';
+
 const APP_VARIANTS = {
     FARMER: {
         id: "regular_farmer",
         label: "Krishivaas Farmer (Regular)",
         modules: [
-            { name: 'Login', path: 'tests/test_cases/regular_farmer_test_cases/test_login_pytest.py' },
+            { name: 'Login', path: COMMON_LOGIN },
             // { name: 'Crophealth', path: 'tests/test_cases/regular_farmer_test_cases/test_crop_health_pytest.py' },
             // { name: 'Farmer Updates ', path: 'tests/test_cases/regular_farmer_test_cases/test_farmer_updates.py' },
             // { name: 'Diagnosis Updates', path: 'tests/test_cases/regular_farmer_test_cases/test_diagnosis_updates.py' },
@@ -42,7 +47,7 @@ const APP_VARIANTS = {
         id: "regular_client",
         label: "Krishivaas Client (Regular)",
         modules: [
-            { name: 'Login', path: 'tests/test_cases/regular_client_test_cases/login_pytest.py' },
+            { name: 'Login', path: COMMON_LOGIN },
             { name: 'Marketplace', path: 'tests/test_cases/regular_client_test_cases/test_marketplace.py' },
             { name: 'Cart', path: 'tests/test_cases/regular_client_test_cases/test_cart.py' },
         ]
@@ -51,7 +56,7 @@ const APP_VARIANTS = {
         id: "state_farmer",
         label: "State Farmer App",
         modules: [
-            { name: 'Login', path: 'tests/test_cases/state_farmer_test_cases/test_login.py' },
+            { name: 'Login', path: COMMON_LOGIN },
             {name: 'Farmer Updates', path: 'tests/test_cases/state_farmer_test_cases/farmer_updates.py'},
             {name: 'Diagnosis Updates', path: 'tests/test_cases/state_farmer_test_cases/diagnosis_updates.py'},
         ]
@@ -60,7 +65,7 @@ const APP_VARIANTS = {
         id: "state_client",
         label: "State Client App",
         modules: [
-            { name: 'Login', path: 'tests/test_cases/state_client_test_cases/test_login.py' },
+            { name: 'Login', path: COMMON_LOGIN },
             { name: 'Tenders', path: 'tests/test_cases/state_client_test_cases/test_tenders.py' },
         ]
     }
@@ -101,7 +106,7 @@ const ModuleFlow = ({ modules, isRunning, onToggleModule }) => (
                             {mod.name}
                         </span>
                         {mismatched && (
-                            <span className="status-label" style={{ color: '#94A3B8', fontStyle: 'italic' }}>
+                            <span className="status-label" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                 {mod.path ? 'Not in test catalog' : 'No automation available'}
                             </span>
                         )}
@@ -173,7 +178,7 @@ const ReadyTestCases = ({ modules }) => {
                 <CheckCircle size={20} className="icon-blue" /> Test Cases Ready to Run
             </h3>
             {loading ? (
-                <div style={{ fontSize: '0.78rem', color: '#94A3B8' }}>Loading test cases...</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Loading test cases...</div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
                     {selectedMatched.map((m) => {
@@ -183,7 +188,10 @@ const ReadyTestCases = ({ modules }) => {
                         // (testcase_key <-> def name). This is the link the issue report
                         // uses: a failure's test_name (the function) maps straight back to
                         // the catalogued testcase_key.
-                        const sourceByFunc = new Map(sourceCases.map((s) => [normalizeFuncKey(s.function_name), s]));
+                        // Prefer the backend's authoritative match_key; fall back to the local
+                        // rule (identical) so older responses still match. Both strip a leading
+                        // tc_/test_ so a source `test_LOGINPOS_TC_029` matches a DB `LOGINPOS_TC_029`.
+                        const sourceByFunc = new Map(sourceCases.map((s) => [s.match_key || normalizeFuncKey(s.function_name), s]));
                         const dbByFunc = new Map(dbCases.map((tc) => [normalizeFuncKey(tc.testcase_key), tc]));
                         const allKeys = new Set([...sourceByFunc.keys(), ...dbByFunc.keys()]);
                         const rows = Array.from(allKeys)
@@ -204,11 +212,11 @@ const ReadyTestCases = ({ modules }) => {
 
                         return (
                             <div key={m.dbModuleId}>
-                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
                                     {m.name}
                                 </div>
                                 {rows.length === 0 ? (
-                                    <div style={{ fontSize: '0.76rem', color: '#94A3B8', fontStyle: 'italic' }}>
+                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                         No test cases catalogued or no <code>test_*</code> functions found in the source file.
                                     </div>
                                 ) : (
@@ -219,7 +227,7 @@ const ReadyTestCases = ({ modules }) => {
                                                     title="DB testcase_key">
                                                     {r.testcaseKey || '—'}
                                                 </span>
-                                                <span style={{ color: '#334155', flex: 1, minWidth: '120px' }}>{r.title}</span>
+                                                <span style={{ color: 'var(--text-primary)', flex: 1, minWidth: '120px' }}>{r.title}</span>
                                                 <span style={{ fontFamily: 'monospace', color: '#7C3AED', fontSize: '0.72rem', flexShrink: 0 }}
                                                     title={r.line ? `Source function (line ${r.line})` : 'Source function'}>
                                                     {r.functionName ? `def ${r.functionName}()` : '—'}
@@ -303,7 +311,7 @@ const LogConsole = ({ logs, statusMode = 'idle' }) => {
         if (statusMode === 'running')  return { ...base, background: 'linear-gradient(90deg,#bfdbfe 0%,#2563EB 50%,#bfdbfe 100%)', backgroundSize: '200% 100%', animation: 'gradientLoad 2s linear infinite' };
         if (statusMode === 'failure')  return { ...base, background: '#DC2626', animation: 'blinkRed 1.5s infinite' };
         if (statusMode === 'success')  return { ...base, background: '#059669', animation: 'blinkGreen 1.5s infinite' };
-        return { ...base, background: '#E2E8F0' };
+        return { ...base, background: 'var(--border-color)' };
     };
 
     const currentLogs = activeTab === 'test' ? logs : apiLogs;
@@ -351,7 +359,7 @@ const LogConsole = ({ logs, statusMode = 'idle' }) => {
                 <button
                     onClick={() => setIsFullScreen(f => !f)}
                     title={isFullScreen ? 'Exit Full Screen' : 'Full Screen'}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', display: 'flex', alignItems: 'center', padding: '3px', marginLeft: '4px' }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: '3px', marginLeft: '4px' }}
                 >
                     {isFullScreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                 </button>
@@ -366,7 +374,7 @@ const LogConsole = ({ logs, statusMode = 'idle' }) => {
             {/* ── Log lines ── */}
             <div className="console-body">
                 {currentLogs.length === 0 && (
-                    <div style={{ color: '#94A3B8', fontSize: '0.75rem', padding: '1.5rem', textAlign: 'center' }}>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', padding: '1.5rem', textAlign: 'center' }}>
                         No logs yet — start a test run to see output here.
                     </div>
                 )}
@@ -416,6 +424,8 @@ function TestScreen({ onHistoryUpdate }) {
     const [selectedAppKey, setSelectedAppKey] = useState(() => loadState('selectedAppKey', ''));
     const [existingApks, setExistingApks] = useState([]);
     const [selectedApk, setSelectedApk] = useState(() => loadState('selectedApk', ''));
+    const [loginPhone, setLoginPhone] = useState(() => loadState('loginPhone', ''));
+    const [loginMpin, setLoginMpin] = useState(() => loadState('loginMpin', ''));
     const [hasOpenedReport, setHasOpenedReport] = useState(false);
     const [networkConfig, setNetworkConfig] = useState(null);
     const [showNewTestButton, setShowNewTestButton] = useState(false);
@@ -441,8 +451,10 @@ function TestScreen({ onHistoryUpdate }) {
         sessionStorage.setItem('selectedAppKey', JSON.stringify(selectedAppKey));
         sessionStorage.setItem('modules', JSON.stringify(modules));
         sessionStorage.setItem('selectedApk', JSON.stringify(selectedApk));
+        sessionStorage.setItem('loginPhone', JSON.stringify(loginPhone));
+        sessionStorage.setItem('loginMpin', JSON.stringify(loginMpin));
         sessionStorage.setItem('logs', JSON.stringify(logs.slice(-200)));
-    }, [apkUrl, isRunning, selectedAppKey, modules, selectedApk, logs]);
+    }, [apkUrl, isRunning, selectedAppKey, modules, selectedApk, loginPhone, loginMpin, logs]);
 
     const getConsoleStatus = () => {
         if (isRunning) return 'running';
@@ -463,8 +475,9 @@ function TestScreen({ onHistoryUpdate }) {
                 const items = res.items || [];
                 setDbApplications(items);
                 setSelectedAppKey((prev) => {
-                    if (prev && items.some((a) => a.application_id === prev)) return prev;
-                    return items[0]?.application_id || '';
+                    if (prev && items.some((a) => String(a.application_id) === String(prev))) return String(prev);
+                    // Keep the key a string (matches HTML <select> values, whose IDs are numeric now).
+                    return items[0]?.application_id != null ? String(items[0].application_id) : '';
                 });
             })
             .catch(() => setDbApplications([]));
@@ -494,7 +507,7 @@ function TestScreen({ onHistoryUpdate }) {
         return () => { cancelled = true; };
     }, [selectedAppKey]);
 
-    const selectedDbApp = dbApplications.find((a) => a.application_id === selectedAppKey) || null;
+    const selectedDbApp = dbApplications.find((a) => String(a.application_id) === String(selectedAppKey)) || null;
 
     // Resolve the automation variant from the app's explicit `variant` field.
     // The unified app's four roles (regular_farmer / regular_client / state_farmer
@@ -649,7 +662,13 @@ function TestScreen({ onHistoryUpdate }) {
             //     }
             // }
 
-            const payload = { tests_to_run: testsToRun, app_type: resolvedVariant.id, run_id: runId };
+            const payload = {
+                tests_to_run: testsToRun,
+                app_type: resolvedVariant.id,
+                run_id: runId,
+                login_phone: loginPhone.trim() || null,
+                login_mpin: loginMpin.trim() || null,
+            };
             const endpoint = selectedApk ? '/test/start-test-existing' : '/test/start-test';
             const body = selectedApk ? { ...payload, apk_name: selectedApk } : { ...payload, url: apkUrl };
 
@@ -810,15 +829,15 @@ function TestScreen({ onHistoryUpdate }) {
             {showStopPopup && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
                     <div className="dashboard-card" style={{ width: '400px', padding: '24px', boxShadow: '0 20px 48px rgba(15,23,42,0.18)' }}>
-                        <h3 style={{ margin: '0 0 8px', color: '#0F172A', fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)', fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <AlertCircle size={18} color="#D97706" /> Test Stopped
                         </h3>
-                        <p style={{ color: '#64748B', margin: '0 0 20px', fontSize: '0.85rem', lineHeight: '1.6' }}>
+                        <p style={{ color: 'var(--text-secondary)', margin: '0 0 20px', fontSize: '0.85rem', lineHeight: '1.6' }}>
                             Tests were stopped manually. Would you like to generate a partial Allure report from the results collected so far?
                         </p>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                             <button onClick={() => setShowStopPopup(false)}
-                                style={{ padding: '7px 16px', borderRadius: '6px', cursor: 'pointer', background: 'transparent', border: '1px solid #E2E8F0', color: '#475569', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'inherit' }}>
+                                style={{ padding: '7px 16px', borderRadius: '6px', cursor: 'pointer', background: 'transparent', border: '1px solid #E2E8F0', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'inherit' }}>
                                 No, Close
                             </button>
                             <button onClick={handleGenerateReport}
@@ -842,7 +861,7 @@ function TestScreen({ onHistoryUpdate }) {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', marginBottom: '12px', borderBottom: '1px solid #E2E8F0' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
                                 <div style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: appiumStatus === 'running' ? '#059669' : '#DC2626', boxShadow: appiumStatus === 'running' ? '0 0 0 3px rgba(5,150,105,.15)' : 'none', flexShrink: 0 }} />
-                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569', letterSpacing: '0.03em' }}>APPIUM SERVER</span>
+                                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.03em' }}>APPIUM SERVER</span>
                                 <span style={{ fontSize: '0.68rem', fontWeight: 600, color: appiumStatus === 'running' ? '#059669' : '#94A3B8', background: appiumStatus === 'running' ? '#ECFDF5' : '#F1F5F9', borderRadius: '4px', padding: '1px 6px' }}>
                                     {appiumStatus === 'running' ? 'Running' : 'Stopped'}
                                 </span>
@@ -861,6 +880,20 @@ function TestScreen({ onHistoryUpdate }) {
                                         <option key={app.application_id} value={app.application_id}>{app.application_name}</option>
                                     ))}
                                 </select>
+                            </div>
+                        </div>
+                        <div className="input-group mb-4" style={{ display: 'flex', gap: '10px' }}>
+                            <div style={{ flex: 2 }}>
+                                <label className="input-label">Login Mobile Number</label>
+                                <input type="tel" inputMode="numeric" placeholder="e.g. 1234567890" value={loginPhone}
+                                    onChange={e => setLoginPhone(e.target.value.replace(/[^0-9]/g, ''))}
+                                    className="text-input" disabled={isRunning} maxLength={15} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <label className="input-label">MPIN</label>
+                                <input type="text" inputMode="numeric" placeholder="1234" value={loginMpin}
+                                    onChange={e => setLoginMpin(e.target.value.replace(/[^0-9]/g, ''))}
+                                    className="text-input" disabled={isRunning} maxLength={6} />
                             </div>
                         </div>
                         <div className="input-group">
@@ -888,7 +921,7 @@ function TestScreen({ onHistoryUpdate }) {
                             )}
                             {showNewTestButton && (
                                 <button onClick={handleReset} className="run-button ml-2"
-                                    style={{ backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0', boxShadow: 'none' }}>
+                                    style={{ backgroundColor: 'var(--bg-input)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', boxShadow: 'none' }}>
                                     Start New Test
                                 </button>
                             )}

@@ -186,5 +186,5 @@ def do_login(driver, obj, test_flow_steps, phone_number, mpin="1234", handle_per
 
     login_enter_phone(driver, obj, test_flow_steps, phone_number)
     login_submit_phone(driver, obj, test_flow_steps)
-    login_enter_mpin_digits(driver, obj, test_flow_steps, mpin)
+    # login_enter_mpin_digits(driver, obj, test_flow_steps, mpin)
     login_submit_mpin(driver, obj, test_flow_steps)

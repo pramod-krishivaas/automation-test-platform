@@ -485,6 +485,8 @@ async def post_run_notify(
     developer_name: str,
     channel_id:     str,
     app_type:       str = None,
+    login_phone:    str = None,
+    login_mpin:     str = None,
 ) -> None:
     loop = asyncio.get_event_loop()
 
@@ -541,7 +543,9 @@ async def post_run_notify(
                 app_name=app_name,
                 app_version=app_version,
                 developer_name=developer_name,
-                run_id=run_id
+                run_id=run_id,
+                login_phone=login_phone,
+                login_mpin=login_mpin,
             ),
         )
         log_to_ui(f"[{run_id[:8]}] Step 1 done", "SUCCESS")

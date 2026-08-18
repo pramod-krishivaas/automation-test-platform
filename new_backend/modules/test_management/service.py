@@ -31,7 +31,7 @@ from new_backend.modules.test_management.db_models import (
     TestRunResult,
 )
 from new_backend.modules.test_management.runner import runner_service
-from new_backend.modules.test_management.discovery import discover_automation_tests
+from new_backend.modules.test_management.discovery import discover_automation_tests, normalize_match_key
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -102,14 +102,14 @@ def list_applications_flow(status: bool | None, q: str | None, page: int, page_s
     return _paginated(items, total, page, page_size, schemas.ApplicationRead)
 
 
-def get_application_flow(application_id: str, db: Session) -> Application:
+def get_application_flow(application_id: int, db: Session) -> Application:
     obj = db.get(Application, application_id)
     if not obj:
         raise HTTPException(404, f"Application {application_id} not found")
     return obj
 
 
-def update_application_flow(application_id: str, payload: schemas.ApplicationUpdate, db: Session) -> Application:
+def update_application_flow(application_id: int, payload: schemas.ApplicationUpdate, db: Session) -> Application:
     obj = get_application_flow(application_id, db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
@@ -118,7 +118,7 @@ def update_application_flow(application_id: str, payload: schemas.ApplicationUpd
     return obj
 
 
-def delete_application_flow(application_id: str, db: Session) -> None:
+def delete_application_flow(application_id: int, db: Session) -> None:
     obj = get_application_flow(application_id, db)
     db.delete(obj)
     db.flush()
@@ -136,7 +136,7 @@ def create_module_flow(payload: schemas.ModuleCreate, db: Session) -> Module:
 
 
 def list_modules_flow(
-    application_id: str | None, status: bool | None, page: int, page_size: int, db: Session
+    application_id: int | None, status: bool | None, page: int, page_size: int, db: Session
 ) -> dict:
     page, page_size = _paginate(page, page_size)
     filters = []
@@ -153,14 +153,14 @@ def list_modules_flow(
     return _paginated(items, total, page, page_size, schemas.ModuleRead)
 
 
-def get_module_flow(module_id: str, db: Session) -> Module:
+def get_module_flow(module_id: int, db: Session) -> Module:
     obj = db.get(Module, module_id)
     if not obj:
         raise HTTPException(404, f"Module {module_id} not found")
     return obj
 
 
-def update_module_flow(module_id: str, payload: schemas.ModuleUpdate, db: Session) -> Module:
+def update_module_flow(module_id: int, payload: schemas.ModuleUpdate, db: Session) -> Module:
     obj = get_module_flow(module_id, db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
@@ -169,7 +169,7 @@ def update_module_flow(module_id: str, payload: schemas.ModuleUpdate, db: Sessio
     return obj
 
 
-def delete_module_flow(module_id: str, db: Session) -> None:
+def delete_module_flow(module_id: int, db: Session) -> None:
     obj = get_module_flow(module_id, db)
     db.delete(obj)
     db.flush()
@@ -196,14 +196,14 @@ def list_priorities_flow(page: int, page_size: int, db: Session) -> dict:
     return _paginated(items, total, page, page_size, schemas.PriorityRead)
 
 
-def get_priority_flow(priority_id: str, db: Session) -> Priority:
+def get_priority_flow(priority_id: int, db: Session) -> Priority:
     obj = db.get(Priority, priority_id)
     if not obj:
         raise HTTPException(404, f"Priority {priority_id} not found")
     return obj
 
 
-def update_priority_flow(priority_id: str, payload: schemas.PriorityUpdate, db: Session) -> Priority:
+def update_priority_flow(priority_id: int, payload: schemas.PriorityUpdate, db: Session) -> Priority:
     obj = get_priority_flow(priority_id, db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
@@ -212,7 +212,7 @@ def update_priority_flow(priority_id: str, payload: schemas.PriorityUpdate, db: 
     return obj
 
 
-def delete_priority_flow(priority_id: str, db: Session) -> None:
+def delete_priority_flow(priority_id: int, db: Session) -> None:
     obj = get_priority_flow(priority_id, db)
     db.delete(obj)
     db.flush()
@@ -246,10 +246,237 @@ def create_test_case_flow(payload: schemas.TestCaseCreate, db: Session) -> TestC
     return obj
 
 
+# ── Bulk upload from Excel ────────────────────────────────────────────────
+# Header name (normalized: lowercased, non-alnum stripped) -> logical field.
+_BULK_HEADER_ALIASES = {
+    "testcaseid": "key",
+    "testcasename": "title",
+    "title": "title",
+    "submodule": "sub_module",
+    "testtype": "polarity",
+    "priority": "priority",
+    "testdata": "test_data",
+    "preconditions": "preconditions",
+    "teststeps": "test_steps",
+    "expectedresult": "expected_result",
+    "remarks": "remarks",
+}
+
+
+def _norm_header(h) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(h or "").strip().lower())
+
+
+# Canonical header row for the downloadable template (order matters for readability).
+_BULK_TEMPLATE_HEADERS = [
+    "Test Case ID", "Sub-Module", "Test Case Name", "Test Type", "Priority",
+    "Test Data", "Preconditions", "Test Steps", "Expected Result", "remarks",
+]
+
+
+def build_bulk_template_xlsx() -> bytes:
+    """Return an .xlsx (headers + one example row) users can fill in and re-upload."""
+    import io
+
+    try:
+        import openpyxl
+        from openpyxl.utils import get_column_letter
+        from openpyxl.styles import Font
+    except ImportError:
+        raise HTTPException(500, "openpyxl is not installed on the server (pip install openpyxl).")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Test Cases"
+    ws.append(_BULK_TEMPLATE_HEADERS)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    ws.append([
+        "RF_ONB_001",
+        "Add Farm",
+        "Add new farm with valid details",
+        "Positive",                       # Test Type: Positive / Negative
+        "High",                           # Priority: Critical / High / Medium / Low
+        "Farm Name: Green Valley; Acreage: 3.5; Land Unit: Acre",
+        "1. Farmer is logged in.\n2. The active farm list is displayed.",
+        "1. Tap 'Add Farm'.\n2. Enter Farm Name and Acreage.\n3. Tap 'Submit'.",
+        "Farm is created and appears in the farm list.",
+        "Optional notes",
+    ])
+    ws.freeze_panes = "A2"
+    for i, header in enumerate(_BULK_TEMPLATE_HEADERS, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = max(18, len(header) + 2)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _compose_bulk_description(vals: dict) -> str | None:
+    """Fold the Excel's rich columns into the single `description` field."""
+    parts = []
+    if vals.get("sub_module"):
+        parts.append(f"Sub-Module: {vals['sub_module']}")
+    if vals.get("test_data"):
+        parts.append(f"Test Data:\n{vals['test_data']}")
+    if vals.get("preconditions"):
+        parts.append(f"Preconditions:\n{vals['preconditions']}")
+    if vals.get("test_steps"):
+        parts.append(f"Test Steps:\n{vals['test_steps']}")
+    if vals.get("remarks"):
+        parts.append(f"Remarks:\n{vals['remarks']}")
+    return "\n\n".join(parts) or None
+
+
+def bulk_upload_test_cases_flow(
+    file_bytes: bytes, filename: str, application_id: int, module_id: int, db: Session
+) -> dict:
+    """
+    Parse an .xlsx of test cases and create them under (application_id, module_id).
+    Columns are matched by header name (see _BULK_HEADER_ALIASES); rows whose
+    testcase_key already exists (in the DB or earlier in the same file) are skipped,
+    not overwritten. Returns a per-file summary.
+    """
+    import io
+
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(500, "openpyxl is not installed on the server (pip install openpyxl).")
+
+    application = db.get(Application, application_id)
+    if not application:
+        raise HTTPException(404, f"Application {application_id} not found")
+    module = db.get(Module, module_id)
+    if not module:
+        raise HTTPException(404, f"Module {module_id} not found")
+    if module.application_id != application_id:
+        raise HTTPException(409, "Module does not belong to the given application")
+
+    logger.info(
+        "[bulk-upload] Start | file=%s | app=%s | module=%s",
+        filename, application.application_name, module.module_name,
+    )
+
+    if not (filename or "").lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(400, "Please upload an .xlsx file.")
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"Could not read the Excel file: {e}")
+    ws = wb.worksheets[0]
+
+    rows = ws.iter_rows(values_only=True)
+    try:
+        header_row = next(rows)
+    except StopIteration:
+        raise HTTPException(400, "The sheet is empty.")
+
+    col_map: dict[int, str] = {}
+    for idx, raw in enumerate(header_row):
+        field = _BULK_HEADER_ALIASES.get(_norm_header(raw))
+        if field and idx not in col_map:
+            col_map[idx] = field
+    if "title" not in col_map.values():
+        raise HTTPException(
+            400,
+            "Could not find a 'Test Case Name' (title) column. Expected headers like: "
+            "Test Case ID, Sub-Module, Test Case Name, Test Type, Priority, Test Data, "
+            "Preconditions, Test Steps, Expected Result, remarks.",
+        )
+    logger.info("[bulk-upload] Columns detected: %s", sorted(set(col_map.values())))
+
+    prio_by_name = {
+        (p.priority_name or "").strip().lower(): p.priority_id
+        for p in db.scalars(select(Priority)).all()
+    }
+    existing_keys = set(db.scalars(select(TestCase.testcase_key)).all())
+
+    total_rows = created = 0
+    created_keys: list[str] = []
+    skipped_keys: list[str] = []
+    error_details: list[str] = []
+    seen_keys_this_file: set[str] = set()
+
+    for i, row in enumerate(rows, start=2):  # 1-based, header was row 1
+        vals: dict[str, str] = {}
+        for idx, field in col_map.items():
+            cell = row[idx] if idx < len(row) else None
+            if cell is not None and str(cell).strip():
+                vals[field] = str(cell).strip()
+
+        if not vals:  # fully blank row
+            continue
+        total_rows += 1
+
+        title = vals.get("title")
+        if not title:
+            error_details.append(f"Row {i}: missing Test Case Name — skipped.")
+            continue
+
+        key = vals.get("key") or None
+        if key:
+            if key in existing_keys or key in seen_keys_this_file:
+                skipped_keys.append(key)
+                logger.info("[bulk-upload] Row %d: skipped '%s' (already exists)", i, key)
+                continue
+            if len(key) > 50:
+                error_details.append(f"Row {i}: Test Case ID '{key}' exceeds 50 chars — skipped.")
+                logger.warning("[bulk-upload] Row %d: '%s' key exceeds 50 chars — skipped", i, key)
+                continue
+
+        polarity_raw = (vals.get("polarity") or "").strip().lower()
+        polarity = "Positive" if polarity_raw.startswith("pos") else "Negative" if polarity_raw.startswith("neg") else None
+        priority_id = prio_by_name.get((vals.get("priority") or "").strip().lower())
+
+        resolved_key = key or _next_testcase_key(db, application.application_name, module.module_name)
+        try:
+            # SAVEPOINT per row: a bad row rolls back only itself, leaving every
+            # previously-inserted row intact for the final commit (via get_db).
+            with db.begin_nested():
+                db.add(TestCase(
+                    testcase_key=resolved_key,
+                    title=title[:300],
+                    application_id=application_id,
+                    module_id=module_id,
+                    priority_id=priority_id,
+                    test_types=[],
+                    polarity=polarity,
+                    description=_compose_bulk_description(vals),
+                    expected_result=vals.get("expected_result"),
+                ))
+        except Exception as e:
+            msg = str(e).splitlines()[0][:200]
+            error_details.append(f"Row {i} ({resolved_key}): {msg}")
+            logger.error("[bulk-upload] Row %d: FAILED '%s' — %s", i, resolved_key, msg)
+            continue
+
+        created += 1
+        created_keys.append(resolved_key)
+        existing_keys.add(resolved_key)
+        seen_keys_this_file.add(resolved_key)
+        logger.info("[bulk-upload] Row %d: created '%s' — %s", i, resolved_key, title[:60])
+
+    logger.info(
+        "[bulk-upload] Done | file=%s | created=%d | skipped=%d | errors=%d | of %d rows",
+        filename, created, len(skipped_keys), len(error_details), total_rows,
+    )
+
+    return {
+        "total_rows": total_rows,
+        "created": created,
+        "skipped": len(skipped_keys),
+        "errors": len(error_details),
+        "created_keys": created_keys,
+        "skipped_keys": skipped_keys,
+        "error_details": error_details,
+    }
+
+
 def list_test_cases_flow(
-    application_id: str | None,
-    module_id: str | None,
-    priority_id: str | None,
+    application_id: int | None,
+    module_id: int | None,
+    priority_id: int | None,
     test_type: str | None,
     status: bool | None,
     polarity: str | None,
@@ -284,14 +511,116 @@ def list_test_cases_flow(
     return _paginated(items, total, page, page_size, schemas.TestCaseRead)
 
 
-def get_test_case_flow(testcase_id: str, db: Session) -> TestCase:
+def get_test_case_flow(testcase_id: int, db: Session) -> TestCase:
     obj = db.get(TestCase, testcase_id)
     if not obj:
         raise HTTPException(404, f"Test case {testcase_id} not found")
     return obj
 
 
-def update_test_case_flow(testcase_id: str, payload: schemas.TestCaseUpdate, db: Session) -> TestCase:
+def find_test_case_by_source_name(
+    name: str, db: Session, application_id: int | None = None, module_id: int | None = None
+) -> TestCase | None:
+    """
+    Resolve a running/source test name (e.g. the pytest function `test_LOGINPOS_TC_029`)
+    to its catalogued TestCase by comparing on `normalize_match_key` — so a
+    `test_`/`tc_` prefix in code matches a sheet/DB key that omits it
+    (`LOGINPOS_TC_029`). Optionally scope to an application/module to disambiguate
+    keys that repeat across suites. Used to store a test result against the right
+    test case. Returns None when nothing matches.
+    """
+    target = normalize_match_key(name)
+    if not target:
+        return None
+    filters = []
+    if application_id is not None:
+        filters.append(TestCase.application_id == application_id)
+    if module_id is not None:
+        filters.append(TestCase.module_id == module_id)
+    for tc in db.scalars(select(TestCase).where(*filters)):
+        if normalize_match_key(tc.testcase_key) == target:
+            return tc
+    return None
+
+
+# ── Live pytest run reporting ─────────────────────────────────────────────
+# Maps a pytest outcome to the TestResultStatus vocabulary.
+_PYTEST_STATUS_MAP = {"passed": "PASSED", "failed": "FAILED", "skipped": "SKIPPED", "error": "FAILED"}
+
+
+def start_pytest_run_flow(payload: schemas.PytestRunStart, db: Session) -> TestRun:
+    """Create a RUNNING TestRun for a real Appium/pytest execution. The automation
+    variant (app_type) is resolved to the DB application_id so results can be scoped."""
+    application_id = None
+    if payload.app_type:
+        app = db.scalars(select(Application).where(Application.variant == payload.app_type)).first()
+        application_id = app.application_id if app else None
+    run = TestRun(
+        run_name=payload.run_name or f"Automation {datetime.utcnow():%Y-%m-%d %H:%M:%S}",
+        application_id=application_id,
+        environment=payload.environment,
+        build_number=payload.build_number,
+        execution_type="Automated",
+        triggered_by=payload.triggered_by,
+        status="RUNNING",
+        started_at=datetime.utcnow(),
+    )
+    db.add(run)
+    db.flush()
+    db.refresh(run)
+    logger.info("[test-run] started run_id=%s app_id=%s (app_type=%s)", run.run_id, application_id, payload.app_type)
+    return run
+
+
+def record_pytest_result_flow(run_id: int, payload: schemas.PytestResultRecord, db: Session) -> TestRunResult:
+    """Store one test's outcome, matched to its catalogued TestCase by name
+    (test_/tc_ prefix stripped). Unmatched tests are still recorded with a null
+    testcase_id so nothing is lost."""
+    run = db.get(TestRun, run_id)
+    if not run:
+        raise HTTPException(404, f"Test run {run_id} not found")
+
+    tc = find_test_case_by_source_name(payload.test_name, db, application_id=run.application_id)
+    status = _PYTEST_STATUS_MAP.get((payload.status or "").strip().lower(), (payload.status or "").upper())
+    result = TestRunResult(
+        run_id=run_id,
+        testcase_id=tc.testcase_id if tc else None,
+        status=status,
+        execution_time=Decimal(str(round(payload.execution_time, 2))) if payload.execution_time is not None else None,
+        device_name=payload.device_name,
+        os_version=payload.os_version,
+        browser=payload.browser,
+        failure_reason=payload.failure_reason,
+        completed_at=datetime.utcnow(),
+    )
+    db.add(result)
+    db.flush()
+    db.refresh(result)
+    logger.info(
+        "[test-run] run=%s test=%s -> testcase=%s status=%s",
+        run_id, payload.test_name, (tc.testcase_key if tc else "UNMATCHED"), status,
+    )
+    return result
+
+
+def finish_pytest_run_flow(run_id: int, payload: schemas.PytestRunFinish, db: Session) -> TestRun:
+    """Finalize a run: explicit status if given, else FAILED when any result failed."""
+    run = db.get(TestRun, run_id)
+    if not run:
+        raise HTTPException(404, f"Test run {run_id} not found")
+    if payload.status:
+        run.status = payload.status
+    else:
+        statuses = db.scalars(select(TestRunResult.status).where(TestRunResult.run_id == run_id)).all()
+        run.status = "FAILED" if any((s or "").upper() in ("FAILED", "ERROR", "BLOCKED") for s in statuses) else "COMPLETED"
+    run.completed_at = datetime.utcnow()
+    db.flush()
+    db.refresh(run)
+    logger.info("[test-run] finished run_id=%s status=%s", run_id, run.status)
+    return run
+
+
+def update_test_case_flow(testcase_id: int, payload: schemas.TestCaseUpdate, db: Session) -> TestCase:
     obj = get_test_case_flow(testcase_id, db)
     data = payload.model_dump(exclude_unset=True)
     if "module_id" in data:
@@ -307,7 +636,7 @@ def update_test_case_flow(testcase_id: str, payload: schemas.TestCaseUpdate, db:
     return obj
 
 
-def delete_test_case_flow(testcase_id: str, db: Session) -> None:
+def delete_test_case_flow(testcase_id: int, db: Session) -> None:
     obj = get_test_case_flow(testcase_id, db)
     db.delete(obj)
     db.flush()
@@ -410,7 +739,7 @@ def discover_automation_tests_flow(path: str) -> list[dict]:
 
 
 def list_test_runs_flow(
-    application_id: str | None, module_id: str | None, status: str | None, page: int, page_size: int, db: Session
+    application_id: int | None, module_id: int | None, status: str | None, page: int, page_size: int, db: Session
 ) -> dict:
     page, page_size = _paginate(page, page_size)
     filters = []
@@ -429,14 +758,14 @@ def list_test_runs_flow(
     return _paginated(items, total, page, page_size, schemas.TestRunRead)
 
 
-def get_test_run_flow(run_id: str, db: Session) -> TestRun:
+def get_test_run_flow(run_id: int, db: Session) -> TestRun:
     obj = db.get(TestRun, run_id)
     if not obj:
         raise HTTPException(404, f"Test run {run_id} not found")
     return obj
 
 
-def cancel_test_run_flow(run_id: str, db: Session) -> TestRun:
+def cancel_test_run_flow(run_id: int, db: Session) -> TestRun:
     obj = get_test_run_flow(run_id, db)
     runner_service.cancel_execution(run_id)
     obj.status = "CANCELLED"
@@ -458,7 +787,7 @@ def create_test_run_result_flow(payload: schemas.TestRunResultCreate, db: Sessio
 
 
 def list_test_run_results_flow(
-    run_id: str | None, testcase_id: str | None, status: str | None, page: int, page_size: int, db: Session
+    run_id: int | None, testcase_id: int | None, status: str | None, page: int, page_size: int, db: Session
 ) -> dict:
     page, page_size = _paginate(page, page_size)
     filters = []
@@ -477,14 +806,14 @@ def list_test_run_results_flow(
     return _paginated(items, total, page, page_size, schemas.TestRunResultRead)
 
 
-def get_test_run_result_flow(execution_id: str, db: Session) -> TestRunResult:
+def get_test_run_result_flow(execution_id: int, db: Session) -> TestRunResult:
     obj = db.get(TestRunResult, execution_id)
     if not obj:
         raise HTTPException(404, f"Execution result {execution_id} not found")
     return obj
 
 
-def update_test_run_result_flow(execution_id: str, payload: schemas.TestRunResultUpdate, db: Session) -> TestRunResult:
+def update_test_run_result_flow(execution_id: int, payload: schemas.TestRunResultUpdate, db: Session) -> TestRunResult:
     obj = get_test_run_result_flow(execution_id, db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
@@ -493,7 +822,7 @@ def update_test_run_result_flow(execution_id: str, payload: schemas.TestRunResul
     return obj
 
 
-def delete_test_run_result_flow(execution_id: str, db: Session) -> None:
+def delete_test_run_result_flow(execution_id: int, db: Session) -> None:
     obj = get_test_run_result_flow(execution_id, db)
     db.delete(obj)
     db.flush()
@@ -516,7 +845,7 @@ def create_execution_logs_flow(payload: schemas.ExecutionLogBulkCreate, db: Sess
     return objs
 
 
-def list_execution_logs_flow(execution_id: str, db: Session) -> list[ExecutionLog]:
+def list_execution_logs_flow(execution_id: int, db: Session) -> list[ExecutionLog]:
     return db.scalars(
         select(ExecutionLog).where(ExecutionLog.execution_id == execution_id).order_by(ExecutionLog.created_at.asc())
     ).all()
@@ -533,7 +862,7 @@ def create_attachment_flow(payload: schemas.AttachmentCreate, db: Session) -> At
     return obj
 
 
-def list_attachments_flow(execution_id: str | None, page: int, page_size: int, db: Session) -> dict:
+def list_attachments_flow(execution_id: int | None, page: int, page_size: int, db: Session) -> dict:
     page, page_size = _paginate(page, page_size)
     filters = []
     if execution_id:
@@ -547,14 +876,14 @@ def list_attachments_flow(execution_id: str | None, page: int, page_size: int, d
     return _paginated(items, total, page, page_size, schemas.AttachmentRead)
 
 
-def get_attachment_flow(attachment_id: str, db: Session) -> Attachment:
+def get_attachment_flow(attachment_id: int, db: Session) -> Attachment:
     obj = db.get(Attachment, attachment_id)
     if not obj:
         raise HTTPException(404, f"Attachment {attachment_id} not found")
     return obj
 
 
-def update_attachment_flow(attachment_id: str, payload: schemas.AttachmentUpdate, db: Session) -> Attachment:
+def update_attachment_flow(attachment_id: int, payload: schemas.AttachmentUpdate, db: Session) -> Attachment:
     obj = get_attachment_flow(attachment_id, db)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
@@ -563,7 +892,7 @@ def update_attachment_flow(attachment_id: str, payload: schemas.AttachmentUpdate
     return obj
 
 
-def delete_attachment_flow(attachment_id: str, db: Session) -> None:
+def delete_attachment_flow(attachment_id: int, db: Session) -> None:
     obj = get_attachment_flow(attachment_id, db)
     db.delete(obj)
     db.flush()
@@ -581,8 +910,8 @@ def create_bug_flow(payload: schemas.BugCreate, db: Session) -> Bug:
 
 
 def list_bugs_flow(
-    testcase_id: str | None,
-    execution_id: str | None,
+    testcase_id: int | None,
+    execution_id: int | None,
     status: str | None,
     severity: str | None,
     page: int,
@@ -608,7 +937,7 @@ def list_bugs_flow(
     return _paginated(items, total, page, page_size, schemas.BugRead)
 
 
-def get_bug_flow(bug_id: str, db: Session) -> Bug:
+def get_bug_flow(bug_id: int, db: Session) -> Bug:
     obj = db.get(Bug, bug_id)
     if not obj:
         raise HTTPException(404, f"Bug {bug_id} not found")

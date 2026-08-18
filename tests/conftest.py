@@ -71,6 +71,7 @@ _issue_counter:  int  = 0
 _session_issues: list = []
 _developer_name: str  = ""
 _test_start_time: datetime.datetime = None  # Track test start time globally
+_db_run_id:      int  = None  # DB TestRun id for this session (result storage)
 
 # Per-test local step buffer — populated by _StepCapturingPlugin
 _local_step_buffer: dict = {}   # { test_name: [step, ...] }
@@ -367,16 +368,72 @@ def pytest_addoption(parser):
     # state_farmer | state_client. Used by the shared login/switch flow to detect
     # the landed app and switch to the intended one.
     parser.addoption("--target-role",    action="store", default=None)
+    # Mobile number + MPIN provided in the UI to log in with (overrides accounts.json).
+    parser.addoption("--login-phone",    action="store", default=None)
+    parser.addoption("--login-mpin",     action="store", default=None)
 
 
 def pytest_sessionstart(session):
-    global _ticket_id, _issue_counter, _developer_name
+    global _ticket_id, _issue_counter, _developer_name, _db_run_id
     _ticket_id     = _make_ticket_id()
     _issue_counter = 0
     print(f"\n[TICKET] Session ticket_id: {_ticket_id}")
     _developer_name = _fetch_developer_name_from_jira()
     if _developer_name:
         print(f"[TICKET] Developer: {_developer_name}")
+
+    # Open a DB TestRun so per-test results can be stored against catalogued cases.
+    try:
+        app_type = session.config.getoption("--target-role", None)
+        app_name = _cfg_from_config(session.config, "--app-name", "")
+        resp = http_requests.post(
+            f"{BACKEND_URL}/api/test-runs/start",
+            json={
+                "app_type": app_type,
+                "run_name": (f"Automation {app_name}".strip() or None),
+                "environment": "device",
+                "triggered_by": _developer_name or "automation",
+            },
+            timeout=5,
+        )
+        if resp.status_code in (200, 201):
+            _db_run_id = resp.json().get("run_id")
+            print(f"[RESULT] DB test run started: run_id={_db_run_id} (app_type={app_type})")
+        else:
+            print(f"[RESULT] Could not start DB run ({resp.status_code}); results won't be stored.")
+    except Exception as e:
+        print(f"[RESULT] Could not start DB run: {e}")
+
+
+def _cfg_from_config(config, option: str, fallback: str) -> str:
+    try:
+        return config.getoption(option) or fallback
+    except Exception:
+        return fallback
+
+
+def _record_result_to_db(item, report) -> None:
+    """Best-effort: store one test's outcome against its catalogued TestCase."""
+    if not _db_run_id:
+        return
+    try:
+        failure_reason = _extract_error_only(report.longrepr) if report.failed else None
+        payload = {
+            "test_name": item.name,
+            "status": report.outcome,          # passed / failed / skipped
+            "execution_time": round(float(getattr(report, "duration", 0.0) or 0.0), 2),
+            "failure_reason": failure_reason,
+        }
+        drv = item.funcargs.get("driver")
+        if drv is not None:
+            caps = getattr(drv, "capabilities", {}) or {}
+            payload["device_name"] = caps.get("deviceName") or caps.get("udid")
+            payload["os_version"] = str(caps.get("platformVersion") or "") or None
+        http_requests.post(
+            f"{BACKEND_URL}/api/test-runs/{_db_run_id}/result", json=payload, timeout=4
+        )
+    except Exception as e:
+        print(f"[RESULT] Could not record result for {item.name}: {e}")
 
 
 def pytest_runtest_setup(item):
@@ -441,6 +498,20 @@ def target_role(request):
     app. Returns None when not supplied (tests should then skip the switch step).
     """
     return request.config.getoption("--target-role")
+
+
+@pytest.fixture(scope="session")
+def login_phone(request):
+    """Mobile number provided in the UI to log in with, or None (→ accounts.json)."""
+    val = request.config.getoption("--login-phone")
+    return val.strip() if val and val.strip() else None
+
+
+@pytest.fixture(scope="session")
+def login_mpin(request):
+    """MPIN provided in the UI for the login number, or None (→ accounts.json)."""
+    val = request.config.getoption("--login-mpin")
+    return val.strip() if val and val.strip() else None
 
 
 # ── Driver fixture ────────────────────────────────────────────────────────────
@@ -591,6 +662,10 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report  = outcome.get_result()
 
+    # Store every test's outcome (pass or fail) against its catalogued test case.
+    if report.when == "call":
+        _record_result_to_db(item, report)
+
     if report.when != "call":
         return
 
@@ -713,6 +788,18 @@ def pytest_sessionfinish(session, exitstatus):
             )
     # print("Review failures in IssuePanel and click 'Create' to file Jira tickets.")
     # print(f"{'='*50}\n")
+
+    # Finalize the DB test run (status derived from recorded results server-side).
+    if _db_run_id:
+        try:
+            http_requests.post(
+                f"{BACKEND_URL}/api/test-runs/{_db_run_id}/finish",
+                json={"exit_status": int(exitstatus)},
+                timeout=5,
+            )
+            print(f"[RESULT] DB test run {_db_run_id} finalized.")
+        except Exception as e:
+            print(f"[RESULT] Could not finalize DB run {_db_run_id}: {e}")
 
 
 def notReportFailed(report):

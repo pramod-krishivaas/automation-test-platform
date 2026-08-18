@@ -3,7 +3,7 @@ import {
   Search, ClipboardList, Info, Eye, CheckCircle2, AlertCircle,
   ThumbsUp, ThumbsDown, Save, RotateCcw, Type, AlignLeft, ChevronDown,
   Filter, ArrowUpDown, Pencil, Trash2, ClipboardCheck, ChevronLeft,
-  ChevronRight,
+  ChevronRight, Upload, FileSpreadsheet, Download,
 } from 'lucide-react';
 import testCaseService from '../../services/testCaseService';
 import catalogService from '../../services/catalogService';
@@ -91,6 +91,15 @@ export default function AddTestCase() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // ── Bulk upload state ──
+  const [bulkAppId, setBulkAppId] = useState('');
+  const [bulkModuleId, setBulkModuleId] = useState('');
+  const [bulkModules, setBulkModules] = useState([]);
+  const [bulkFile, setBulkFile] = useState(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+  const [bulkError, setBulkError] = useState('');
+
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
 
   const applicationById = useMemo(
@@ -149,6 +158,34 @@ export default function AddTestCase() {
     })();
   }, [form.applicationId]);
 
+  useEffect(() => {
+    if (!bulkAppId) { setBulkModules([]); return; }
+    (async () => {
+      try {
+        const res = await catalogService.listModules(bulkAppId);
+        setBulkModules(res.items || []);
+      } catch {
+        setBulkModules([]);
+      }
+    })();
+  }, [bulkAppId]);
+
+  const handleBulkUpload = async () => {
+    if (!bulkFile || !bulkAppId || !bulkModuleId) return;
+    setBulkUploading(true);
+    setBulkError('');
+    setBulkResult(null);
+    try {
+      const res = await testCaseService.bulkUploadTestCases(bulkFile, bulkAppId, bulkModuleId);
+      setBulkResult(res);
+      await refreshTestCases();
+    } catch (err) {
+      setBulkError(err?.response?.data?.detail || 'Bulk upload failed.');
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
   const isDirty = useMemo(
     () => JSON.stringify(form) !== JSON.stringify(EMPTY_FORM),
     [form],
@@ -190,6 +227,7 @@ export default function AddTestCase() {
   const applicationOptions = applications.map((a) => ({ value: a.application_id, label: a.application_name }));
   const moduleOptions = modules.map((m) => ({ value: m.module_id, label: m.module_name }));
   const priorityOptions = priorities.map((p) => ({ value: p.priority_id, label: p.priority_name }));
+  const bulkModuleOptions = bulkModules.map((m) => ({ value: m.module_id, label: m.module_name }));
 
   return (
     <div className="atc-page">
@@ -205,6 +243,98 @@ export default function AddTestCase() {
           <span>{error}</span>
         </div>
       )}
+
+      {/* ── Bulk upload from Excel ── */}
+      <div className="atc-card" style={{ marginBottom: '1rem' }}>
+        <div className="atc-card-head">
+          <span className="atc-card-icon blue"><FileSpreadsheet size={17} /></span>
+          <h2>Bulk Upload from Excel</h2>
+        </div>
+        <p className="atc-hint" style={{ marginTop: 0 }}>
+          Upload an <code>.xlsx</code> with columns: <strong>Test Case ID, Sub-Module, Test Case Name,
+          Test Type, Priority, Test Data, Preconditions, Test Steps, Expected Result, remarks</strong>.
+          Rows whose Test Case ID already exists are skipped (not overwritten).
+        </p>
+
+        <div className="atc-form-grid">
+          <div className="atc-field">
+            <Label required>App</Label>
+            <Select
+              value={bulkAppId}
+              onChange={(v) => { setBulkAppId(v); setBulkModuleId(''); setBulkResult(null); }}
+              options={applicationOptions}
+              placeholder="Select App"
+            />
+          </div>
+
+          <div className="atc-field">
+            <Label required>Module</Label>
+            <Select
+              value={bulkModuleId}
+              onChange={setBulkModuleId}
+              options={bulkModuleOptions}
+              placeholder={bulkAppId ? 'Select Module' : 'Select an app first'}
+              disabled={!bulkAppId}
+            />
+          </div>
+
+          <div className="atc-field span-2">
+            <Label required>Excel File</Label>
+            <input
+              type="file"
+              accept=".xlsx,.xlsm"
+              className="atc-input"
+              onChange={(e) => { setBulkFile(e.target.files?.[0] || null); setBulkResult(null); setBulkError(''); }}
+            />
+            {bulkFile && <span className="atc-hint">{bulkFile.name}</span>}
+          </div>
+        </div>
+
+        {bulkError && (
+          <div className="atc-error-banner" style={{ marginTop: '0.6rem' }}>
+            <AlertCircle size={15} />
+            <span>{bulkError}</span>
+          </div>
+        )}
+
+        {bulkResult && (
+          <div style={{ marginTop: '0.7rem' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="atc-tag green">Created {bulkResult.created}</span>
+              <span className="atc-tag slate">Skipped {bulkResult.skipped}</span>
+              {bulkResult.errors > 0 && <span className="atc-tag red">Errors {bulkResult.errors}</span>}
+              <span className="atc-hint">of {bulkResult.total_rows} rows</span>
+            </div>
+            {(bulkResult.skipped_keys?.length > 0 || bulkResult.error_details?.length > 0) && (
+              <div className="atc-hint" style={{ marginTop: '0.4rem', maxHeight: '130px', overflow: 'auto' }}>
+                {bulkResult.skipped_keys?.length > 0 && (
+                  <div>Skipped (already exist): {bulkResult.skipped_keys.join(', ')}</div>
+                )}
+                {bulkResult.error_details?.map((d, i) => (
+                  <div key={i} style={{ color: 'var(--status-red)' }}>{d}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="atc-actions">
+          <a
+            className="atc-btn ghost"
+            href="http://localhost:8000/api/test-cases/bulk-template"
+          >
+            <Download size={15} /> Download Template
+          </a>
+          <span className="spacer" />
+          <button
+            className="atc-btn primary"
+            onClick={handleBulkUpload}
+            disabled={bulkUploading || !bulkFile || !bulkAppId || !bulkModuleId}
+          >
+            <Upload size={15} /> {bulkUploading ? 'Uploading...' : 'Upload Test Cases'}
+          </button>
+        </div>
+      </div>
 
       {/* ── Main grid ── */}
       <div className="atc-grid">
@@ -411,7 +541,7 @@ export default function AddTestCase() {
       </div>
 
       {/* ── Existing Test Cases ── */}
-      <div className="atc-card atc-table-card">
+      {/* <div className="atc-card atc-table-card">
         <div className="atc-table-head">
           <h2>Existing Test Cases</h2>
           <div className="atc-table-tools">
@@ -488,7 +618,7 @@ export default function AddTestCase() {
             <button className="atc-page-btn" disabled><ChevronRight size={15} /></button>
           </div>
         </div>
-      </div>
+      </div> */}
     </div>
   );
 }

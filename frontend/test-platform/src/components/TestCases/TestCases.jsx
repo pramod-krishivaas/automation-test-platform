@@ -79,7 +79,7 @@ export default function TestCases() {
 
   const moduleOptions = useMemo(() => {
     const list = filters.applicationId
-      ? allModules.filter((m) => m.application_id === filters.applicationId)
+      ? allModules.filter((m) => String(m.application_id) === String(filters.applicationId))
       : allModules;
     return list.map((m) => ({ value: m.module_id, label: m.module_name }));
   }, [allModules, filters.applicationId]);

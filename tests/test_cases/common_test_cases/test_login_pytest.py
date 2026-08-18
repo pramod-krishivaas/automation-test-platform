@@ -1,13 +1,16 @@
 """
-Regular Farmer — Login (unified app).
+Common Login (unified app) — shared by ALL four apps.
 
-Vertical slice of the new architecture:
+Login is identical across regular_farmer / regular_client / state_farmer /
+state_client, so this single test is mapped to every app's "Login" module:
+
   shared login (pages/common/login_page)  →  land by priority  →
-  switch to the target role (pages/common/switch_page)  →  assert on target home.
+  detect landed app  →  switch to the SELECTED app (pages/common/switch_page)  →
+  assert on the selected app's home.
 
-The target role comes from the UI selection via the `--target-role` pytest option
-(exposed as the `target_role` fixture in conftest.py); it defaults to
-'regular_farmer' for direct/local runs.
+Which app to land on comes from the UI selection via the `--target-role` pytest
+option (exposed as the `target_role` fixture in conftest.py). DEFAULT_ROLE is only
+used for direct/local runs that don't pass --target-role.
 """
 import os
 import json
@@ -20,7 +23,9 @@ from pages.common.switch_page import detect_landed_app, switch_to_app, assert_on
 import sys
 sys.dont_write_bytecode = True
 
-ROLE = "regular_farmer"
+# Only used for local/direct pytest runs; the UI always passes the selected app's
+# variant via --target-role, which overrides this.
+DEFAULT_ROLE = "regular_farmer"
 
 
 def _account_for(role):
@@ -33,10 +38,10 @@ def _account_for(role):
         with open(data_path, "r", encoding="utf-8") as f:
             accounts = json.load(f)
         acct = accounts.get("single_role", {}).get(role, {})
-        return acct.get("phone") or "7660852538", acct.get("mpin") or "1234"
+        return acct.get("phone") or "9618574550", acct.get("mpin") or "1234"
     except Exception as e:
         print(f"[data] Could not load accounts.json ({e}); using defaults.")
-        return "7660852538", "1234"
+        return "9618574550", "1234"
 
 
 @allure.epic("Login Flow")
@@ -49,11 +54,18 @@ class TestLogin:
 
     @allure.story("Successful Login")
     @allure.title("Verify user can login with valid credentials")
-    def test_loginpos_001(self, driver, target_role):
+    def test_LOGINPOS_TC_030(self, driver, target_role, login_phone, login_mpin):
         test_flow_steps = []
-        # Fall back to this suite's own role for direct/local runs (no UI selection).
-        role = target_role or ROLE
-        phone, mpin = _account_for(role)
+        # The selected app (from the UI); DEFAULT_ROLE only for local runs.
+        role = target_role or DEFAULT_ROLE
+        # Prefer the mobile number provided in the UI; fall back to accounts.json
+        # for the selected app's role. The number determines which apps are
+        # reachable; `role` (the selected app) is where we end up after switching.
+        if login_phone:
+            phone, mpin = login_phone, (login_mpin or "1234")
+        else:
+            phone, mpin = _account_for(role)
+        print(f"[test] Logging in with phone={phone} (mpin set: {bool(mpin)}) for role={role}")
 
         try:
             # 1. Shared login — lands on whichever home the number resolves to by priority.
@@ -63,10 +75,10 @@ class TestLogin:
             landed = detect_landed_app(driver, self)
             print(f"[test] Selected/target role = {role}; landed on = {landed}")
 
-            # 3. Switch to the intended app if the landed app differs.
+            # 3. Switch to the SELECTED app if the landed app differs.
             switch_to_app(driver, self, role, test_flow_steps)
 
-            # 4. Confirm we're on the target app's home.
+            # 4. Confirm we're on the selected app's home.
             assert_on_app(driver, self, role, test_flow_steps)
 
         finally:

@@ -60,6 +60,47 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
 }
 
+/* ── Dark theme ───────────────────────────────────────────────────────────────
+   Applied when <html data-theme="dark"> is set (see Sidebar theme toggle). Only
+   the tokens are redefined — every token-driven style flips automatically. */
+:root[data-theme="dark"] {
+  /* Surface */
+  --bg-page:    #0B1220;
+  --bg-card:    #131C2E;
+  --bg-input:   #0F1826;
+  --bg-console: #0A1017;
+  --bg-sidebar: #131C2E;
+
+  /* Text */
+  --text-primary:   #E6EDF6;
+  --text-secondary: #9FB0C3;
+  --text-muted:     #64748B;
+
+  /* Border */
+  --border-color:   #26324A;
+  --border-focus:   #3B82F6;
+
+  /* Brand / Accent (foreground accents read fine on dark; tints go darker) */
+  --accent-blue:       #3B82F6;
+  --accent-blue-hover: #60A5FA;
+  --accent-blue-light: #17233C;
+  --accent-blue-mid:   #1E3A5F;
+
+  /* Status backgrounds → dark tints (foregrounds unchanged) */
+  --status-green-bg: #0C2B22;
+  --status-red-bg:   #35171B;
+  --status-amber-bg: #33260F;
+  --status-blue-bg:  #17233C;
+
+  /* Elevation — deeper shadows on dark */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.45);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.55), 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.4);
+  --shadow-lg: 0 10px 24px rgba(0,0,0,0.6), 0 4px 8px rgba(0,0,0,0.5);
+
+  color-scheme: dark;
+}
+
 /* ── Reset & Base ───────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
 
