@@ -165,12 +165,26 @@ def download_apk(gdrive_url: str, progress_callback=None) -> str:
         return abs_path
 
     except Exception as e:
-        print(f"❌ Error downloading APK: {str(e)}")
+        msg = str(e)
+        print(f"❌ Error downloading APK: {msg}")
         # Cleanup: Remove partial file if it exists
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+        if 'tmp_path' in locals() and tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
-        raise e
-    
+        # Translate gdown's verbose errors into a concise, actionable message.
+        low = msg.lower()
+        if "public link" in low or "permission" in low or "anyone with the link" in low:
+            raise Exception(
+                "Google Drive file is not publicly accessible. In Drive open the file → "
+                "Share → General access → set to 'Anyone with the link', then try again. "
+                "(Or pick a file under 'Select Existing APK'.)"
+            )
+        if "too small" in low or "html error page" in low:
+            raise Exception(
+                "The downloaded file isn't a valid APK (got an HTML page). Make sure the "
+                "Drive link points directly to the APK and is shared with 'Anyone with the link'."
+            )
+        raise Exception(f"APK download failed: {msg.splitlines()[0][:200]}")
+
     finally:
         # Restore stderr
         sys.stderr = original_stderr

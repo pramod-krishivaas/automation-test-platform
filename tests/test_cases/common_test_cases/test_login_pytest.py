@@ -53,7 +53,7 @@ class TestLogin:
         load_locators_once(self, request)
 
     @allure.story("Successful Login")
-    @allure.title("Verify user can login with valid credentials")
+    @allure.title("test_LOGINPOS_TC_030 -- Verify user can login with valid credentials")
     def test_LOGINPOS_TC_030(self, driver, target_role, login_phone, login_mpin):
         test_flow_steps = []
         # The selected app (from the UI); DEFAULT_ROLE only for local runs.
