@@ -37,6 +37,12 @@ const catalogService = {
     return response.data;
   },
 
+  // Tests physically under tests/test_suites/<type>/ (folder = type authority).
+  discoverTypeFolderTests: async (type) => {
+    const response = await api.get("/test-type-tests", { params: { type } });
+    return response.data;
+  },
+
 };
 
 export default catalogService;

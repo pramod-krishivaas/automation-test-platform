@@ -33,11 +33,7 @@
         "status": "Success"
     },
     {
-        "step": "Already on target app 'Telangana Farmerrrrrrrrrrrr'",
-        "status": "Success"
-    },
-    {
-        "step": "Verified on target app 'Telangana Farmerrrrrrrrrrrr'",
+        "step": "Switched to target app 'Telangana Client'",
         "status": "Success"
     }
 ]

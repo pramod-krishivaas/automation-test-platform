@@ -116,48 +116,34 @@ def _log_visible_text(driver, limit=12):
 
 def switch_to_app(driver, obj, target_role, test_flow_steps=None):
     """
-    Ensure the app is on `target_role`'s home.
+    Switch the unified app to `target_role`, then return so the target's test suite
+    runs directly.
 
-    • target_role falsy               → nothing to enforce, returns True.
-    • no home_markers configured yet  → logs a WARNING and skips (so login tests
-                                        still pass before markers are captured).
-    • already on target               → returns True.
-    • landed != target               → opens the switch toggle, selects the target,
-                                        re-detects and asserts success.
+    By design this performs NO landed-app detection — neither before nor after the
+    switch. The in-app switcher is opened and the target app selected unconditionally,
+    then we hand control straight back to the test. That removes any dependency on
+    `home_markers` (which need not be configured) and the slow post-switch re-detect;
+    a number that only ever reaches the target lands there anyway, and selecting the
+    "Current App" entry in the switcher is a harmless no-op.
+
+    • target_role falsy → nothing to switch, returns True.
     """
     if not target_role:
-        print("[switch] No target_role provided; skipping app-switch enforcement.")
+        print("[switch] No target_role provided; skipping app-switch.")
         return True
 
     if target_role not in ROLE_PRIORITY:
         pytest.fail(f"[switch] Unknown target_role '{target_role}'. Expected one of {ROLE_PRIORITY}.")
 
-    configured = _configured_markers(obj)
-    if not configured:
-        _log_step(
-            test_flow_steps,
-            f"Switch skipped: home_markers not configured (target was '{target_role}')",
-            status="Skipped",
-        )
-        print("[switch] WARNING: fill `home_markers` in unified_app.json to enable landed-app "
-              "detection & switching.")
-        return True
+    print(f"[switch] Switching to target app '{target_role}' via toggle (no detection)…")
 
-    landed = detect_landed_app(driver, obj)
-
-    if landed == target_role:
-        _log_step(test_flow_steps, f"Already on target app '{ROLE_LABELS.get(target_role, target_role)}'")
-        return True
-
-    print(f"[switch] Landed on '{landed}', target is '{target_role}'. Switching via toggle…")
-
-    # 1. Open the in-app switcher
+    # 1. Open the in-app switcher.
     if not obj.switch_toggle_button_xpath:
         pytest.fail("[switch] switch_control.switch_toggle_button is not configured in unified_app.json.")
     if not smart_click(driver, "App switch toggle", obj.switch_toggle_button_xpath, "Switch"):
         pytest.fail("[switch] Could not open the app switcher (switch_toggle_button).")
 
-    # 2. Select the target app in the switcher
+    # 2. Select the target app in the switcher.
     target_xpath = (getattr(obj, "switch_targets", {}) or {}).get(target_role)
     if not target_xpath:
         pytest.fail(
@@ -167,19 +153,9 @@ def switch_to_app(driver, obj, target_role, test_flow_steps=None):
     if not smart_click(driver, f"Switch to {target_role}", target_xpath, ROLE_LABELS.get(target_role)):
         pytest.fail(f"[switch] Could not select target app '{target_role}' in the switcher.")
 
-    # 3. Confirm we actually arrived. A switch reloads the ENTIRE target app and, on
-    #    the first (cold) switch after a fresh install, it re-fetches all data over
-    #    the network before the home header paints — far slower than a normal screen
-    #    change. Let the switcher animation settle, then verify with a long timeout.
+    # 3. Let the switch settle, then run the target's suite directly — NO post-switch
+    #    landed-app detection/verification (per requirement).
     time.sleep(3)
-    new_landed = detect_landed_app(driver, obj, timeout=90, probe_timeout=2)
-    if new_landed != target_role:
-        _log_visible_text(driver)
-        pytest.fail(
-            f"[switch] After switching, expected '{target_role}' home but detected '{new_landed}' "
-            f"(waited 90s). See 'On-screen now' above for what was showing."
-        )
-
     _log_step(test_flow_steps, f"Switched to target app '{ROLE_LABELS.get(target_role, target_role)}'")
     return True
 

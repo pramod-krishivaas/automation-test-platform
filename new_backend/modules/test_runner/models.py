@@ -14,6 +14,9 @@ class ExistingTestRequest(BaseModel):
     # Mobile number + MPIN provided in the UI to log in with (overrides accounts.json).
     login_phone: Optional[str] = None
     login_mpin: Optional[str] = None
+    # Test types selected in the UI (Smoke / Regression / End-to-End / Sanity). Drives
+    # both folder-based collection (test_suites/<type>/) and the DB test_types filter.
+    test_types: Optional[List[str]] = None
 
 class LogMessage(BaseModel):
     message: str
@@ -26,3 +29,4 @@ class TestRequest(BaseModel):
     run_id: Optional[str] = None
     login_phone: Optional[str] = None
     login_mpin: Optional[str] = None
+    test_types: Optional[List[str]] = None

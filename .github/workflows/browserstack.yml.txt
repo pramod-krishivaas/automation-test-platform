@@ -1,0 +1,262 @@
+# Name displayed in the GitHub Actions UI.
+name: Unified App Regression
+
+# Defines how this workflow is triggered.
+on:
+
+  # Allows the workflow to be triggered through the GitHub API.
+  # Your always-running Slack listener will use this trigger.
+  workflow_dispatch:
+
+    # Defines the input values required when triggering the workflow.
+    inputs:
+
+      # APK URL that will be received from the Slack listener.
+      apk_url:
+
+        # Description displayed in the GitHub Actions UI.
+        description: "APK URL received from Slack"
+
+        # The APK URL must be provided.
+        required: true
+
+        # The value is a text string.
+        type: string
+
+      # Optional Slack channel ID.
+      # This can be used when sending the final result back
+      # to the same channel from which the APK URL was received.
+      slack_channel_id:
+
+        description: "Slack channel ID for test result notification"
+
+        required: false
+
+        type: string
+
+
+# A concurrency group prevents multiple regression pipelines
+# from using the same logical execution at the same time.
+#
+# If a new APK is posted while another run is executing,
+# cancel-in-progress: false means the new run will wait in the queue.
+concurrency:
+
+  # All Unified App regression runs belong to the same group.
+  group: unified-app-regression
+
+  # Do not cancel an existing regression run when a new APK arrives.
+  cancel-in-progress: false
+
+
+# Defines all jobs in this workflow.
+jobs:
+
+  # The main regression job.
+  regression:
+
+    # Uses a GitHub-hosted Ubuntu virtual machine.
+    #
+    # This machine runs only when the workflow is triggered.
+    # BrowserStack provides the Android device/emulator,
+    # so no Android emulator is required on this GitHub runner.
+    runs-on: ubuntu-latest
+
+
+    # Environment variables available to every step in this job.
+    env:
+
+      # BrowserStack username stored securely in GitHub Secrets.
+      BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+
+      # BrowserStack access key stored securely in GitHub Secrets.
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+
+      # Backend URL used by the automation framework
+      # for role priority and role-related information.
+      BACKEND_API_URL: ${{ secrets.BACKEND_API_URL }}
+
+      # Backend token stored securely in GitHub Secrets.
+      BACKEND_API_TOKEN: ${{ secrets.BACKEND_API_TOKEN }}
+
+      # APK URL received from the workflow trigger.
+      APK_URL: ${{ inputs.apk_url }}
+
+      # Slack channel from which the APK was received.
+      SLACK_CHANNEL_ID: ${{ inputs.slack_channel_id }}
+
+      # Unique build name for this GitHub execution.
+      BUILD_NAME: Unified-App-${{ github.run_number }}
+
+      # Python version used by the framework.
+      PYTHON_VERSION: "3.11"
+
+
+    # Pipeline steps.
+    steps:
+
+
+      # Step 1:
+      # Downloads the latest automation framework code
+      # from the GitHub repository onto the temporary runner.
+      - name: Checkout automation framework
+        uses: actions/checkout@v4
+
+
+      # Step 2:
+      # Installs Python on the GitHub-hosted runner.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+
+          # Uses the Python version defined above.
+          python-version: ${{ env.PYTHON_VERSION }}
+
+          # Caches pip dependencies to make future runs faster.
+          cache: pip
+
+
+      # Step 3:
+      # Installs all Python dependencies required by the framework.
+      - name: Install Python dependencies
+        run: |
+
+          # Upgrades pip.
+          python -m pip install --upgrade pip
+
+          # Installs packages from requirements.txt.
+          pip install -r requirements.txt
+
+
+      # Step 4:
+      # Validates that an APK URL was actually passed
+      # by the Slack listener.
+      - name: Validate APK URL
+        run: |
+
+          # Stop the workflow if APK_URL is empty.
+          if [ -z "$APK_URL" ]; then
+            echo "ERROR: APK URL was not provided"
+            exit 1
+          fi
+
+          # Print confirmation without exposing any secrets.
+          echo "APK URL received successfully"
+
+
+      # Step 5:
+      # Downloads the APK from the URL received from Slack.
+      #
+      # Your Python script should handle Google Drive URLs
+      # and save the final file as downloads/unified-app.apk.
+      - name: Download APK
+        run: |
+          python scripts/download_apk.py
+
+
+      # Step 6:
+      # Verifies that the APK file exists and is not empty
+      # before sending it to BrowserStack.
+      - name: Validate downloaded APK
+        run: |
+
+          # Check whether the expected APK exists.
+          if [ ! -f "downloads/unified-app.apk" ]; then
+            echo "ERROR: APK file was not downloaded"
+            exit 1
+          fi
+
+          # Check whether the APK file is empty.
+          if [ ! -s "downloads/unified-app.apk" ]; then
+            echo "ERROR: Downloaded APK is empty"
+            exit 1
+          fi
+
+          echo "APK validation completed successfully"
+
+
+      # Step 7:
+      # Uploads the downloaded APK to BrowserStack.
+      #
+      # The upload script should:
+      # 1. Upload the APK.
+      # 2. Receive the BrowserStack app URL.
+      # 3. Store it for the following automation steps.
+      - name: Upload APK to BrowserStack
+        run: |
+          python scripts/upload_to_browserstack.py
+
+
+      # Step 8:
+      # Runs the role-based regression orchestration.
+      #
+      # The Python orchestrator should:
+      # 1. Start the first role.
+      # 2. Log in using the configured credentials.
+      # 3. Detect the actual role.
+      # 4. Select the matching regression suite.
+      # 5. Run the tests on BrowserStack.
+      # 6. Generate Allure results.
+      # 7. Get the next role based on backend priority.
+      # 8. Repeat until all required roles are completed.
+      - name: Run role-based regression
+        run: |
+          python scripts/run_regression.py
+
+
+      # Step 9:
+      # Uploads Allure result files even if some tests fail.
+      #
+      # always() ensures this step runs after both
+      # successful and failed test executions.
+      - name: Upload Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+
+          # Name shown in GitHub Actions artifacts.
+          name: allure-results-${{ github.run_number }}
+
+          # Location where the framework stores Allure results.
+          path: allure-results
+
+          # Prevents workflow failure if no Allure files exist.
+          if-no-files-found: warn
+
+
+      # Step 10:
+      # Uploads useful failure artifacts when tests fail.
+      #
+      # Examples can include screenshots, page source,
+      # Appium logs, and custom framework logs.
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+
+          # Artifact name.
+          name: failure-artifacts-${{ github.run_number }}
+
+          # Upload these directories if your framework creates them.
+          path: |
+            screenshots
+            logs
+
+          # Show a warning if one of the folders does not exist.
+          if-no-files-found: warn
+
+
+      # Step 11:
+      # Sends the final execution summary to Slack.
+      #
+      # always() ensures Slack receives a message even if
+      # the regression suite fails.
+      - name: Send result to Slack
+        if: always()
+        env:
+
+          # GitHub workflow status.
+          JOB_STATUS: ${{ job.status }}
+
+        run: |
+          python scripts/send_slack_report.py

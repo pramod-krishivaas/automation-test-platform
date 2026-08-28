@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import Header from "../Header/Header";
 // import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'; // disabled: MetricsChart
-import { Play, Terminal, Activity, CheckCircle, Circle, AlertCircle, /* Cpu, */ Maximize2, Minimize2 } from 'lucide-react';
+import { Play, Terminal, Activity, CheckCircle, Circle, AlertCircle, /* Cpu, */ Maximize2, Minimize2, Layers, FolderOpen, Tag } from 'lucide-react';
 import UIScreenshotIssues from '../UIScreenshotIssues/UIScreenshotIssues';
 import IssuePanel from '../IssuePanel/IssuePanel';
 import NetworkConfigPanel from '../NetworkConfig/NetworkConfig'
@@ -15,7 +15,7 @@ const API_URL = 'http://localhost:8000';
 
 // LEGACY fallback only. Since the unified app's four roles share one package_name,
 // the authoritative UI→variant key is now the Application's `variant` field (see
-// resolvedVariant below). This map is consulted only for older DB rows that were
+// resolvedVariantId below). This map is consulted only for older DB rows that were
 // created before the variant column existed. New rows should set `variant` directly.
 const PACKAGE_VARIANT_MAP = {
     "com.agribride.krishivaas.farmer_app": "regular_farmer",
@@ -24,51 +24,97 @@ const PACKAGE_VARIANT_MAP = {
     "com.agribride.krishivaas.client_state_app": "state_client",
 };
 
-const normalizeModuleName = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
 // Login is identical for all four apps, so every app's "Login" module maps to this
 // single shared test. It reads the selected app (via --target-role), logs in, and
 // switches to that app. Lives outside the per-app folders (common_test_cases).
 const COMMON_LOGIN = 'tests/test_cases/common_test_cases/test_login_pytest.py';
 
-const APP_VARIANTS = {
-    FARMER: {
+// Test types selectable in the UI. Sent to the backend as `test_types`; drives both
+// folder-based collection (tests/test_suites/<type>/) and the DB test_types filter.
+// Labels MUST match TEST_TYPE_FOLDERS keys in tests/test_type_config.py and the DB tags.
+const AVAILABLE_TEST_TYPES = ['Smoke', 'Regression', 'End-to-End', 'Sanity'];
+
+// ── SINGLE SOURCE OF TRUTH: app_variant → test_type → module → suite path ──────
+// Selecting an app + a test type runs exactly the module suites listed under that
+// (app, type). The path is a function of ALL THREE — the same module can point at a
+// different suite per type — which mirrors the on-disk layout tests/test_suites/
+// <type>/<app>/. `Login` is the one shared suite (COMMON_LOGIN) and is listed under
+// every type of every app so it always runs. Add a module by dropping its real
+// suite path under the right type; only paths that exist on disk actually execute
+// (the backend skips missing ones), so unbuilt modules can be stubbed here safely.
+// Keys of `test_type` MUST match AVAILABLE_TEST_TYPES / TEST_TYPE_FOLDERS.
+const APP_TEST_CONFIG = {
+    regular_farmer: {
         id: "regular_farmer",
         label: "Krishivaas Farmer (Regular)",
-        modules: [
-            { name: 'Login', path: COMMON_LOGIN },
-            // { name: 'Crophealth', path: 'tests/test_cases/regular_farmer_test_cases/test_crop_health_pytest.py' },
-            // { name: 'Farmer Updates ', path: 'tests/test_cases/regular_farmer_test_cases/test_farmer_updates.py' },
-            // { name: 'Diagnosis Updates', path: 'tests/test_cases/regular_farmer_test_cases/test_diagnosis_updates.py' },
-            // { name: 'Onboarding', path: 'tests/test_cases/regular_farmer_test_cases/test_onboarding_pytest.py' },
-        ]
+        test_type: {
+            "Smoke":      { Login: COMMON_LOGIN },
+            "Regression": { Login: COMMON_LOGIN },
+            "End-to-End": { Login: COMMON_LOGIN },
+            "Sanity":     { Login: COMMON_LOGIN },
+        },
     },
-    CLIENT: {
+    regular_client: {
         id: "regular_client",
         label: "Krishivaas Client (Regular)",
-        modules: [
-            { name: 'Login', path: COMMON_LOGIN },
-            { name: 'Marketplace', path: 'tests/test_cases/regular_client_test_cases/test_marketplace.py' },
-            { name: 'Cart', path: 'tests/test_cases/regular_client_test_cases/test_cart.py' },
-        ]
+        test_type: {
+            "Smoke":      { Login: COMMON_LOGIN },
+            "Regression": { Login: COMMON_LOGIN },
+            "End-to-End": { Login: COMMON_LOGIN },
+            "Sanity":     { Login: COMMON_LOGIN },
+        },
     },
-    STATE_FARMER: {
+    state_farmer: {
         id: "state_farmer",
-        label: "State Farmer App",
-        modules: [
-            { name: 'Login', path: COMMON_LOGIN },
-            {name: 'Farmer Updates', path: 'tests/test_cases/state_farmer_test_cases/farmer_updates.py'},
-            {name: 'Diagnosis Updates', path: 'tests/test_cases/state_farmer_test_cases/diagnosis_updates.py'},
-        ]
+        label: "Krishivaas Telangana Farmer",
+        test_type: {
+            "Smoke":      { Login: COMMON_LOGIN },
+            "Regression": { Login: COMMON_LOGIN },
+            "End-to-End": { Login: COMMON_LOGIN },
+            "Sanity":     { Login: COMMON_LOGIN },
+        },
     },
-    STATE_CLIENT: {
+    state_client: {
         id: "state_client",
-        label: "State Client App",
-        modules: [
-            { name: 'Login', path: COMMON_LOGIN },
-            { name: 'Tenders', path: 'tests/test_cases/state_client_test_cases/test_tenders.py' },
-        ]
-    }
+        label: "Krishivaas Telangana Client",
+        test_type: {
+            "Smoke":      { Login: COMMON_LOGIN },
+            "Regression": { Login: COMMON_LOGIN },
+            "End-to-End": {
+                Login:      COMMON_LOGIN,
+                Onboarding: "tests/test_suites/end_to_end/state_client/test_onboarding_pytest.py",
+            },
+            "Sanity":     { Login: COMMON_LOGIN },
+        },
+    },
+};
+
+// Build the module list for an app from APP_TEST_CONFIG, scoped to the selected test
+// types (or ALL of the app's types when none are selected). Each module carries the
+// concrete suite paths it will run — deduped, tagged with the type(s) that include
+// them — so the run payload and the "ready to run" panel derive straight from here.
+const modulesFromConfig = (cfg, selectedTypes) => {
+    if (!cfg) return [];
+    const typeMap = cfg.test_type || {};
+    const scope = (selectedTypes && selectedTypes.length)
+        ? selectedTypes.filter((t) => typeMap[t])
+        : Object.keys(typeMap);
+    const acc = new Map();                     // moduleName -> Map(path -> Set(types))
+    scope.forEach((type) => {
+        Object.entries(typeMap[type] || {}).forEach(([moduleName, path]) => {
+            if (!path) return;
+            if (!acc.has(moduleName)) acc.set(moduleName, new Map());
+            const byPath = acc.get(moduleName);
+            if (!byPath.has(path)) byPath.set(path, new Set());
+            byPath.get(path).add(type);
+        });
+    });
+    return Array.from(acc.entries()).map(([name, byPath]) => ({
+        name,
+        runTargets: Array.from(byPath.entries()).map(([path, types]) => ({ path, types: Array.from(types) })),
+        status: 'pending',
+        isSelected: true,
+    }));
 };
 
 /* ─── ModuleFlow ─────────────────────────────────────────────────────────── */
@@ -120,57 +166,41 @@ const ModuleFlow = ({ modules, isRunning, onToggleModule }) => (
     </div>
 );
 
-/* ─── ReadyTestCases — DB test cases matched against real automation source ──
- * Purely informational: does not gate what actually runs. Running still
- * executes via the whole-file automation paths, exactly as before. For each
- * selected + matched module, cross-references DB test cases (testcase_key)
- * against @allure.title("ID -- ...") functions found in the module's actual
- * automation file (via GET /api/automation-tests), scoped per-module since
- * IDs like "TC_001" are not globally unique across files.
+/* ─── ReadyTestCases — the concrete test_* functions that will run ────────────
+ * Config-driven and informational: for each SELECTED module it lists the actual
+ * test_* functions discovered in the suite file(s) that module resolves to under
+ * the selected test type(s) (via GET /api/automation-tests). Because every app's
+ * config includes Login → COMMON_LOGIN, the shared login cases show for ALL apps.
  * ─────────────────────────────────────────────────────────────────────────── */
-const normalizeTestId = (s) => (s || '').trim().toUpperCase();
-
-// Normalize a DB testcase_key or a source function name to a common key so they
-// match despite the tc_/test_ prefix difference (pytest requires test_*, while the
-// catalogued key may be tc_*). e.g. "tc_loginpos_001" and "test_loginpos_001"
-// both normalize to "loginpos_001".
-const normalizeFuncKey = (s) => (s || '').trim().toLowerCase().replace(/^(tc|test)_/, '');
-
 const ReadyTestCases = ({ modules }) => {
-    const [dbByModule, setDbByModule] = useState({});
-    const [sourceByModule, setSourceByModule] = useState({});
+    const [sourceByPath, setSourceByPath] = useState({});
     const [loading, setLoading] = useState(false);
 
-    const selectedMatched = modules.filter((m) => m.matched && m.isSelected && m.dbModuleId);
-    const key = selectedMatched.map((m) => m.dbModuleId).join(',');
+    const selected = modules.filter((m) => m.isSelected);
+    // Every distinct suite path the selected modules will run (a module can span
+    // several types, but the same file is only discovered once).
+    const paths = Array.from(new Set(
+        selected.flatMap((m) => (m.runTargets || []).map((rt) => rt.path))
+    ));
+    const key = paths.join(',');
 
     useEffect(() => {
-        if (!selectedMatched.length) { setDbByModule({}); setSourceByModule({}); return; }
+        if (!paths.length) { setSourceByPath({}); return; }
         setLoading(true);
-        Promise.all([
-            Promise.all(
-                selectedMatched.map((m) =>
-                    testCaseService.listTestCases({ module_id: m.dbModuleId, page_size: 50 })
-                        .then((res) => [m.name, res.items || []])
-                        .catch(() => [m.name, []])
-                )
-            ),
-            Promise.all(
-                selectedMatched.map((m) =>
-                    (m.path ? catalogService.discoverAutomationTests(m.path) : Promise.resolve([]))
-                        .then((items) => [m.name, items || []])
-                        .catch(() => [m.name, []])
-                )
-            ),
-        ]).then(([dbEntries, sourceEntries]) => {
-            setDbByModule(Object.fromEntries(dbEntries));
-            setSourceByModule(Object.fromEntries(sourceEntries));
+        Promise.all(
+            paths.map((p) =>
+                catalogService.discoverAutomationTests(p)
+                    .then((items) => [p, items || []])
+                    .catch(() => [p, []])
+            )
+        ).then((entries) => {
+            setSourceByPath(Object.fromEntries(entries));
             setLoading(false);
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key]);
 
-    if (!selectedMatched.length) return null;
+    if (!selected.length) return null;
 
     return (
         <div className="dashboard-card">
@@ -181,65 +211,126 @@ const ReadyTestCases = ({ modules }) => {
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Loading test cases...</div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-                    {selectedMatched.map((m) => {
-                        const dbCases = dbByModule[m.name] || [];
-                        const sourceCases = sourceByModule[m.name] || [];
-                        // Match a DB test case to its source function by normalized name
-                        // (testcase_key <-> def name). This is the link the issue report
-                        // uses: a failure's test_name (the function) maps straight back to
-                        // the catalogued testcase_key.
-                        // Prefer the backend's authoritative match_key; fall back to the local
-                        // rule (identical) so older responses still match. Both strip a leading
-                        // tc_/test_ so a source `test_LOGINPOS_TC_029` matches a DB `LOGINPOS_TC_029`.
-                        const sourceByFunc = new Map(sourceCases.map((s) => [s.match_key || normalizeFuncKey(s.function_name), s]));
-                        const dbByFunc = new Map(dbCases.map((tc) => [normalizeFuncKey(tc.testcase_key), tc]));
-                        const allKeys = new Set([...sourceByFunc.keys(), ...dbByFunc.keys()]);
-                        const rows = Array.from(allKeys)
-                            .map((k) => {
-                                const db = dbByFunc.get(k);
-                                const src = sourceByFunc.get(k);
-                                return {
-                                    key: k,
-                                    testcaseKey: db?.testcase_key || null,
-                                    functionName: src?.function_name || null,
-                                    line: src?.line || null,
-                                    title: db?.title || src?.title || '',
-                                    inDb: !!db,
-                                    inSource: !!src,
-                                };
-                            })
-                            .sort((a, b) => (a.testcaseKey || a.functionName || '').localeCompare(b.testcaseKey || b.functionName || ''));
+                    {selected.map((m) => (
+                        <div key={m.name}>
+                            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                                {m.name}
+                            </div>
+                            {(m.runTargets || []).map((rt) => {
+                                const fns = sourceByPath[rt.path] || [];
+                                return (
+                                    <div key={rt.path} style={{ marginBottom: '6px' }}>
+                                        <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', fontFamily: 'monospace', marginBottom: '3px' }}>
+                                            {rt.path} <span style={{ fontStyle: 'italic' }}>· {rt.types.join(', ')}</span>
+                                        </div>
+                                        {fns.length === 0 ? (
+                                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                                No <code>test_*</code> functions found (suite not built yet).
+                                            </div>
+                                        ) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                                {fns
+                                                    .slice()
+                                                    .sort((a, b) => (a.function_name || '').localeCompare(b.function_name || ''))
+                                                    .map((s) => (
+                                                        <div key={s.function_name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', flexWrap: 'wrap' }}>
+                                                            <span style={{ color: 'var(--text-primary)', flex: 1, minWidth: '120px' }}>{s.title || s.function_name}</span>
+                                                            <span style={{ fontFamily: 'monospace', color: '#7C3AED', fontSize: '0.72rem', flexShrink: 0 }}
+                                                                title={s.line ? `Source function (line ${s.line})` : 'Source function'}>
+                                                                def {s.function_name}()
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
 
+/* ─── TestTypeCases — maps selected test types to the tests they'll run ────────
+ * For each selected test type, shows BOTH sides of the type membership model:
+ *   • FOLDER tests — physically under tests/test_suites/<type>/ (folder = authority,
+ *     collected wholesale, no DB tag), via GET /api/test-type-tests.
+ *   • DB-TAGGED tests — catalogued test cases whose test_types include this type,
+ *     for the selected app, via GET /api/test-cases?test_type=…&application_id=…
+ * Purely informational — mirrors what the backend collects for --test-type.
+ * ─────────────────────────────────────────────────────────────────────────── */
+const TYPE_FOLDER_NAME = { 'Smoke': 'smoke', 'Regression': 'regression', 'End-to-End': 'end_to_end', 'Sanity': 'sanity' };
+
+const TestTypeCases = ({ selectedTestTypes, applicationId }) => {
+    const [byType, setByType] = useState({});
+    const [loading, setLoading] = useState(false);
+    const key = selectedTestTypes.join(',') + '|' + (applicationId || '');
+
+    useEffect(() => {
+        if (!selectedTestTypes.length) { setByType({}); return; }
+        setLoading(true);
+        Promise.all(selectedTestTypes.map(async (t) => {
+            const [folder, tagged] = await Promise.all([
+                catalogService.discoverTypeFolderTests(t).catch(() => []),
+                testCaseService.listTestCases({ test_type: t, application_id: applicationId || undefined, page_size: 100 })
+                    .then((r) => r.items || []).catch(() => []),
+            ]);
+            return [t, { folder, tagged }];
+        })).then((entries) => { setByType(Object.fromEntries(entries)); setLoading(false); });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [key]);
+
+    if (!selectedTestTypes.length) return null;
+
+    const rowStyle = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', flexWrap: 'wrap' };
+    const badge = (bg, color, label) => (
+        <span style={{ fontSize: '0.6rem', fontWeight: 700, padding: '2px 7px', borderRadius: '999px', flexShrink: 0, background: bg, color }}>{label}</span>
+    );
+
+    return (
+        <div className="dashboard-card">
+            <h3 className="card-title">
+                <Layers size={20} className="icon-blue" /> Test Cases by Type
+            </h3>
+            {loading ? (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Loading test cases...</div>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                    {selectedTestTypes.map((t) => {
+                        const data = byType[t] || { folder: [], tagged: [] };
+                        const total = data.folder.length + data.tagged.length;
                         return (
-                            <div key={m.dbModuleId}>
-                                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                                    {m.name}
+                            <div key={t}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t}</span>
+                                    <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>{total} test{total !== 1 ? 's' : ''}</span>
                                 </div>
-                                {rows.length === 0 ? (
+                                {total === 0 ? (
                                     <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                        No test cases catalogued or no <code>test_*</code> functions found in the source file.
+                                        No tests in <code>tests/test_suites/{TYPE_FOLDER_NAME[t] || t}/</code> and none DB-tagged “{t}” for this app.
                                     </div>
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                                        {rows.map((r) => (
-                                            <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.78rem', flexWrap: 'wrap' }}>
-                                                <span style={{ fontFamily: 'monospace', color: '#2563EB', fontWeight: 600, flexShrink: 0 }}
-                                                    title="DB testcase_key">
-                                                    {r.testcaseKey || '—'}
-                                                </span>
-                                                <span style={{ color: 'var(--text-primary)', flex: 1, minWidth: '120px' }}>{r.title}</span>
-                                                <span style={{ fontFamily: 'monospace', color: '#7C3AED', fontSize: '0.72rem', flexShrink: 0 }}
-                                                    title={r.line ? `Source function (line ${r.line})` : 'Source function'}>
-                                                    {r.functionName ? `def ${r.functionName}()` : '—'}
-                                                </span>
-                                                <span style={{
-                                                    fontSize: '0.62rem', fontWeight: 700, padding: '2px 7px', borderRadius: '999px',
-                                                    flexShrink: 0,
-                                                    color: r.inDb && r.inSource ? '#16A34A' : '#B45309',
-                                                    background: r.inDb && r.inSource ? '#DCFCE7' : '#FEF3C7',
-                                                }}>
-                                                    {r.inDb && r.inSource ? 'Matched' : r.inDb ? 'DB only (no def)' : 'Source only (not catalogued)'}
-                                                </span>
+                                        {data.folder.map((f, i) => (
+                                            <div key={`f${i}`} style={rowStyle}>
+                                                <FolderOpen size={13} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />
+                                                <span style={{ fontFamily: 'monospace', color: 'var(--accent-purple)', fontSize: '0.72rem', flexShrink: 0 }}
+                                                    title={`${f.file}${f.line ? ` (line ${f.line})` : ''}`}>def {f.function_name}()</span>
+                                                <span style={{ color: 'var(--text-secondary)', flex: 1, minWidth: '90px' }}>{f.title || '—'}</span>
+                                                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>{f.app || '—'}</span>
+                                                {badge('rgba(124,58,237,0.14)', 'var(--accent-purple)', 'Folder')}
+                                            </div>
+                                        ))}
+                                        {data.tagged.map((tc) => (
+                                            <div key={`d${tc.testcase_id}`} style={rowStyle}>
+                                                <Tag size={13} style={{ color: '#2563EB', flexShrink: 0 }} />
+                                                <span style={{ fontFamily: 'monospace', color: '#2563EB', fontWeight: 600, fontSize: '0.72rem', flexShrink: 0 }}
+                                                    title="DB testcase_key">{tc.testcase_key}</span>
+                                                <span style={{ color: 'var(--text-primary)', flex: 1, minWidth: '90px' }}>{tc.title}</span>
+                                                {badge('rgba(37,99,235,0.12)', '#2563EB', 'DB tag')}
                                             </div>
                                         ))}
                                     </div>
@@ -247,6 +338,9 @@ const ReadyTestCases = ({ modules }) => {
                             </div>
                         );
                     })}
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>
+                        Folder tests always run for the type; DB-tagged tests run when their module is also selected above.
+                    </span>
                 </div>
             )}
         </div>
@@ -419,25 +513,19 @@ function TestScreen({ onHistoryUpdate }) {
     const [isDeviceConnected, setIsDeviceConnected] = useState(false);
     const [appiumStatus, setAppiumStatus] = useState('stopped');
     const [showStopPopup, setShowStopPopup] = useState(false);
-    // Holds a DB application_id (UUID), not an APP_VARIANTS enum key — resolved
-    // against the automation file registry via package_name (see matchedModules below).
+    // Holds a DB application_id, resolved to an automation variant id (regular_farmer
+    // etc.) via the app's `variant` field, then to its APP_TEST_CONFIG node.
     const [selectedAppKey, setSelectedAppKey] = useState(() => loadState('selectedAppKey', ''));
     const [existingApks, setExistingApks] = useState([]);
     const [selectedApk, setSelectedApk] = useState(() => loadState('selectedApk', ''));
     const [loginPhone, setLoginPhone] = useState(() => loadState('loginPhone', ''));
     const [loginMpin, setLoginMpin] = useState(() => loadState('loginMpin', ''));
+    const [selectedTestTypes, setSelectedTestTypes] = useState(() => loadState('selectedTestTypes', []));
     const [hasOpenedReport, setHasOpenedReport] = useState(false);
     const [networkConfig, setNetworkConfig] = useState(null);
     const [showNewTestButton, setShowNewTestButton] = useState(false);
 
     const [dbApplications, setDbApplications] = useState([]);
-    const [dbModules, setDbModules] = useState([]);
-
-    const prevAppKeyRef = useRef(selectedAppKey);
-    // Which app the CURRENT dbModules array actually belongs to — set atomically
-    // at fetch-resolution time (not via a separate state flag) so the reset
-    // effect below can never race against the fetch effect's own state update.
-    const dbModulesAppRef = useRef(null);
 
     const [modules, setModules] = useState(() => {
         const saved = sessionStorage.getItem('modules');
@@ -453,8 +541,9 @@ function TestScreen({ onHistoryUpdate }) {
         sessionStorage.setItem('selectedApk', JSON.stringify(selectedApk));
         sessionStorage.setItem('loginPhone', JSON.stringify(loginPhone));
         sessionStorage.setItem('loginMpin', JSON.stringify(loginMpin));
+        sessionStorage.setItem('selectedTestTypes', JSON.stringify(selectedTestTypes));
         sessionStorage.setItem('logs', JSON.stringify(logs.slice(-200)));
-    }, [apkUrl, isRunning, selectedAppKey, modules, selectedApk, loginPhone, loginMpin, logs]);
+    }, [apkUrl, isRunning, selectedAppKey, modules, selectedApk, loginPhone, loginMpin, selectedTestTypes, logs]);
 
     const getConsoleStatus = () => {
         if (isRunning) return 'running';
@@ -484,29 +573,6 @@ function TestScreen({ onHistoryUpdate }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Fetch DB modules for the selected application. `cancelled` guards against
-    // a stale response landing after the user has already switched apps again.
-    useEffect(() => {
-        let cancelled = false;
-        if (!selectedAppKey) {
-            setDbModules([]);
-            dbModulesAppRef.current = selectedAppKey;
-            return undefined;
-        }
-        catalogService.listModules(selectedAppKey)
-            .then((res) => {
-                if (cancelled) return;
-                setDbModules(res.items || []);
-                dbModulesAppRef.current = selectedAppKey;
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setDbModules([]);
-                dbModulesAppRef.current = selectedAppKey;
-            });
-        return () => { cancelled = true; };
-    }, [selectedAppKey]);
-
     const selectedDbApp = dbApplications.find((a) => String(a.application_id) === String(selectedAppKey)) || null;
 
     // Resolve the automation variant from the app's explicit `variant` field.
@@ -516,45 +582,30 @@ function TestScreen({ onHistoryUpdate }) {
     // package map only for older rows that predate the variant column.
     const resolvedVariantId = selectedDbApp?.variant
         || (selectedDbApp?.package_name ? PACKAGE_VARIANT_MAP[selectedDbApp.package_name] : null);
-    const resolvedVariant = resolvedVariantId
-        ? Object.values(APP_VARIANTS).find((v) => v.id === resolvedVariantId) || null
-        : null;
+    // The nested app→test_type→module→path config (APP_TEST_CONFIG) is the single
+    // source of truth for what runs. Resolve the app's config node by variant id.
+    const resolvedConfig = resolvedVariantId ? (APP_TEST_CONFIG[resolvedVariantId] || null) : null;
 
-    // Union of automation-file modules and DB modules, matched by normalized name.
-    // Entries present in only one side are still included (matched: false) so
-    // mismatches stay visible rather than silently disappearing.
-    const matchedModules = React.useMemo(() => {
-        const automationModules = resolvedVariant?.modules || [];
-        const byAutomationName = new Map(automationModules.map((m) => [normalizeModuleName(m.name), m]));
-        const byDbName = new Map(dbModules.map((m) => [normalizeModuleName(m.module_name), m]));
-        const allKeys = new Set([...byAutomationName.keys(), ...byDbName.keys()]);
+    // Modules for the selected app, scoped to the selected test types (all of the
+    // app's types when none are chosen). Each carries the concrete suite paths it runs.
+    const configModules = React.useMemo(
+        () => modulesFromConfig(resolvedConfig, selectedTestTypes),
+        [resolvedConfig, selectedTestTypes]
+    );
 
-        return Array.from(allKeys).map((key) => {
-            const automation = byAutomationName.get(key);
-            const db = byDbName.get(key);
-            const matched = !!automation && !!db;
-            return {
-                name: automation?.name || db?.module_name,
-                path: automation?.path || null,
-                dbModuleId: db?.module_id || null,
-                matched,
-                status: 'pending',
-                isSelected: matched,
-            };
-        });
-    }, [resolvedVariant, dbModules]);
-
-    // Reset `modules` when the selected app actually changes — gated on
-    // dbModulesAppRef so this only fires once dbModules is confirmed to belong
-    // to the currently selected app (not stale data from the previous one).
+    // Rebuild `modules` whenever the app or the selected test types change. Preserve
+    // the user's per-module checkbox by name across type toggles; new modules default
+    // to selected.
     useEffect(() => {
-        if (dbModulesAppRef.current !== selectedAppKey) return;
-        if (prevAppKeyRef.current !== selectedAppKey) {
-            setModules(matchedModules);
-            prevAppKeyRef.current = selectedAppKey;
-        }
+        setModules((prev) => {
+            const wasSelected = new Map(prev.map((m) => [m.name, m.isSelected]));
+            return configModules.map((m) => ({
+                ...m,
+                isSelected: wasSelected.has(m.name) ? wasSelected.get(m.name) : true,
+            }));
+        });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedAppKey, matchedModules]);
+    }, [configModules]);
 
     const toggleModuleSelection = (index) => {
         if (isRunning) return;
@@ -619,9 +670,19 @@ function TestScreen({ onHistoryUpdate }) {
     const handleRunTest = async () => {
         if (appiumStatus !== 'running') { alert("Appium Server is not running. Start it first."); return; }
         if (!apkUrl && !selectedApk) { alert("Please enter a Google Drive URL or select an existing APK!"); return; }
-        if (!resolvedVariant) { alert("No automation registered for this application (check its package name in Apps & Modules)."); return; }
-        const testsToRun = modules.filter(m => m.matched && m.isSelected).map(m => ({ name: m.name, path: m.path }));
-        if (!testsToRun.length) { alert("Please select at least one module to run."); return; }
+        if (!resolvedConfig) { alert("No test config registered for this application (check its variant in Apps & Modules)."); return; }
+        // Expand every selected module into the concrete suite paths it runs (across
+        // the selected types), deduped by path. Config paths already encode the type
+        // (tests/test_suites/<type>/…), so pytest gets exact files — no server-side
+        // folder collection or type-filtering needed.
+        const seenPaths = new Set();
+        const testsToRun = modules
+            .filter((m) => m.isSelected)
+            .flatMap((m) => (m.runTargets || []).map((rt) => ({ name: m.name, path: rt.path })))
+            .filter((t) => t.path && !seenPaths.has(t.path) && seenPaths.add(t.path));
+        if (!testsToRun.length) {
+            alert("No runnable suites for this app + test-type selection. Pick a module (and a test type that includes one)."); return;
+        }
 
         setHasOpenedReport(false);
         setModules(prev => prev.map(m => ({ ...m, status: 'pending' })));
@@ -630,7 +691,7 @@ function TestScreen({ onHistoryUpdate }) {
         setIsDownloading(!!apkUrl);
         setLogs([]);
 
-        handleIncomingData({ type: 'LOG', payload: { message: `Initializing ${selectedDbApp?.application_name || resolvedVariant.label} test with ${testsToRun.length} modules...`, status: 'INFO' } });
+        handleIncomingData({ type: 'LOG', payload: { message: `Initializing ${selectedDbApp?.application_name || resolvedConfig.label} test with ${testsToRun.length} suite(s)...`, status: 'INFO' } });
 
         try {
             const runId = crypto.randomUUID();
@@ -664,10 +725,14 @@ function TestScreen({ onHistoryUpdate }) {
 
             const payload = {
                 tests_to_run: testsToRun,
-                app_type: resolvedVariant.id,
+                app_type: resolvedConfig.id,
                 run_id: runId,
                 login_phone: loginPhone.trim() || null,
                 login_mpin: loginMpin.trim() || null,
+                // Config is the single source of truth: the selected test types already
+                // resolved to explicit suite paths above, so we don't send test_types
+                // (which would trigger server-side folder collection + DB type-filtering).
+                test_types: null,
             };
             const endpoint = selectedApk ? '/test/start-test-existing' : '/test/start-test';
             const body = selectedApk ? { ...payload, apk_name: selectedApk } : { ...payload, url: apkUrl };
@@ -734,8 +799,8 @@ function TestScreen({ onHistoryUpdate }) {
         // Clear logs completely
         setLogs([]);
 
-        // Reset module statuses
-        setModules(matchedModules);
+        // Reset module statuses (fresh from config, all selected)
+        setModules(configModules.map((m) => ({ ...m })));
 
         // Clear session storage
         [
@@ -896,6 +961,40 @@ function TestScreen({ onHistoryUpdate }) {
                                     className="text-input" disabled={isRunning} maxLength={6} />
                             </div>
                         </div>
+                        <div className="input-group mb-4">
+                            <label className="input-label">Test Types</label>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
+                                {AVAILABLE_TEST_TYPES.map((tt) => {
+                                    const active = selectedTestTypes.includes(tt);
+                                    return (
+                                        <button
+                                            key={tt}
+                                            type="button"
+                                            disabled={isRunning}
+                                            onClick={() => setSelectedTestTypes(prev =>
+                                                prev.includes(tt) ? prev.filter(x => x !== tt) : [...prev, tt]
+                                            )}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: '6px',
+                                                padding: '5px 11px', borderRadius: '999px',
+                                                cursor: isRunning ? 'not-allowed' : 'pointer',
+                                                fontSize: '0.75rem', fontWeight: 600, fontFamily: 'inherit',
+                                                border: active ? '1px solid var(--accent-blue)' : '1px solid var(--border-color)',
+                                                background: active ? 'var(--accent-blue-light)' : 'transparent',
+                                                color: active ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                                                transition: 'all 0.15s',
+                                            }}>
+                                            <input type="checkbox" checked={active} readOnly tabIndex={-1}
+                                                style={{ pointerEvents: 'none', margin: 0 }} />
+                                            {tt}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '4px', display: 'block' }}>
+                                Picks which module suites run for this app. None selected = every type the app defines. Login always runs.
+                            </span>
+                        </div>
                         <div className="input-group">
                             <label className="input-label">APK Source (Drive URL)</label>
                             <input type="text" placeholder="https://drive.google.com/..." value={apkUrl}
@@ -936,6 +1035,7 @@ function TestScreen({ onHistoryUpdate }) {
                     {/* Test cases catalogued for the selected + matched modules */}
                     <div className="grid-item-flo">
                         <ReadyTestCases modules={modules} />
+                        <TestTypeCases selectedTestTypes={selectedTestTypes} applicationId={selectedAppKey} />
                     </div>
 
                     {/* Network Config */}

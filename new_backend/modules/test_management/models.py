@@ -360,6 +360,11 @@ class AutomationTestCase(BaseModel):
     match_key: str | None = None   # function_name with tc_/test_ prefix stripped (for DB matching)
 
 
+class TypeFolderTest(AutomationTestCase):
+    file: str                      # repo-relative path under tests/test_suites/<type>/
+    app: str = ""                  # per-app subfolder (regular_farmer / common / …)
+
+
 # ─────────────────────────────
 # Bulk upload (test cases from Excel)
 # ─────────────────────────────

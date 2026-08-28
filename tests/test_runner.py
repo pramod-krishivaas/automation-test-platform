@@ -233,6 +233,7 @@ def run_tests_and_get_suggestions(
     run_id=None,
     login_phone: Optional[str] = None,
     login_mpin: Optional[str] = None,
+    test_types: Optional[List[str]] = None,
 ) -> None:
     """
     Runs all tests in a single session to keep the app open,
@@ -264,16 +265,13 @@ def run_tests_and_get_suggestions(
 
     _ensure_clean_allure_dirs(project_root)
 
-    # 1. Resolve and Validate Tests
-    final_test_list = []
-    if tests_to_run:
-        final_test_list = tests_to_run
+    # 1. Resolve and Validate Tests.
+    #    tests_to_run holds the module files chosen in the UI. When test types are
+    #    ALSO selected we additionally collect whole test_suites/<type>/ folders, so a
+    #    run can be modules-only, folders-only, or both.
+    final_test_list = tests_to_run or []
 
-    if not final_test_list:
-        send_log("No valid test modules found. Aborting.", "FAILED")
-        return
-
-    # 2. Prepare Path-to-Name Mapping for Status Tracking
+    # 2. Prepare Path-to-Name Mapping for Status Tracking (module files only).
     valid_paths = []
     path_to_name_map = {}
 
@@ -287,8 +285,43 @@ def run_tests_and_get_suggestions(
         else:
             send_log(f"Script not found: {path}", "WARNING")
 
-    if not valid_paths:
-        send_log("No valid scripts to execute.", "FAILED")
+    # 2b. Folder collection targets — one per selected test type. The folder location
+    #     alone defines type membership for anything inside (no DB tag needed), so the
+    #     whole folder is handed to pytest. Uses the shared TEST_TYPE_FOLDERS map so
+    #     the convention lives in exactly one place (tests/test_type_config.py).
+    folder_targets = []
+    if test_types:
+        try:
+            from tests.test_type_config import folder_for_type
+        except ImportError:                       # when tests/ (not repo root) is the entry
+            from test_type_config import folder_for_type
+        seen_folders = set()
+        for t in test_types:
+            folder = folder_for_type(t)
+            if not folder or not os.path.isdir(folder):
+                continue
+            has_tests = any(
+                f.startswith("test_") and f.endswith(".py")
+                for _r, _d, files in os.walk(folder) for f in files
+            )
+            folder_abs = os.path.abspath(folder)
+            if has_tests and folder_abs not in seen_folders:
+                folder_targets.append(folder_abs)
+                seen_folders.add(folder_abs)
+        # De-dup: drop any module file that already lives under a selected type folder
+        # (the folder target will collect it) so pytest isn't handed the same file twice.
+        if folder_targets:
+            valid_paths = [
+                p for p in valid_paths
+                if not any(
+                    os.path.commonpath([os.path.abspath(os.path.join(project_root, p)), fa]) == fa
+                    for fa in folder_targets
+                )
+            ]
+
+    collection_targets = valid_paths + folder_targets
+    if not collection_targets:
+        send_log("No valid scripts or test-type folders to execute.", "FAILED")
         return
 
     # Tell frontend a new run is starting
@@ -302,7 +335,7 @@ def run_tests_and_get_suggestions(
     except Exception:
         pass
 
-    pytest_args = valid_paths + [f"--apk={apk_path}", "-v"]
+    pytest_args = collection_targets + [f"--apk={apk_path}", "-v"]
 
     if app_name:
         pytest_args.append(f"--app-name={app_name}")
@@ -319,6 +352,11 @@ def run_tests_and_get_suggestions(
         pytest_args.append(f"--login-phone={login_phone}")
     if login_mpin:
         pytest_args.append(f"--login-mpin={login_mpin}")
+    if test_types:
+        # Requested test types — consumed by conftest.py's pytest_collection_modifyitems:
+        # folder tests kept by path (test_suites/<type>/), everything else kept by its
+        # DB test_types tag. Comma-separated to match --test-type's parser in conftest.
+        pytest_args.append(f"--test-type={','.join(test_types)}")
 
     overall_ok = run_pytest_streaming_with_tracking(
         pytest_args,

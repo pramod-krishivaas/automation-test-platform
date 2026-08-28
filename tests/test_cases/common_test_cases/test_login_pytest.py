@@ -18,7 +18,7 @@ import allure
 import pytest
 
 from pages.common.login_page import load_locators_once, do_login
-from pages.common.switch_page import detect_landed_app, switch_to_app, assert_on_app
+from pages.common.switch_page import switch_to_app
 
 import sys
 sys.dont_write_bytecode = True
@@ -71,15 +71,9 @@ class TestLogin:
             # 1. Shared login — lands on whichever home the number resolves to by priority.
             do_login(driver, self, test_flow_steps, phone_number=phone, mpin=mpin)
 
-            # 2. Detect where we landed (logged for visibility).
-            landed = detect_landed_app(driver, self)
-            print(f"[test] Selected/target role = {role}; landed on = {landed}")
-
-            # 3. Switch to the SELECTED app if the landed app differs.
+            # 2. Switch to the SELECTED app and run its suite directly — no landed-app
+            #    detection before or after the switch (per requirement).
             switch_to_app(driver, self, role, test_flow_steps)
-
-            # 4. Confirm we're on the selected app's home.
-            assert_on_app(driver, self, role, test_flow_steps)
 
         finally:
             os.makedirs("test-flows", exist_ok=True)

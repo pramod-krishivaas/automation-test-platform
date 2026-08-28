@@ -371,6 +371,84 @@ def pytest_addoption(parser):
     # Mobile number + MPIN provided in the UI to log in with (overrides accounts.json).
     parser.addoption("--login-phone",    action="store", default=None)
     parser.addoption("--login-mpin",     action="store", default=None)
+    # Requested test types (comma-separated): Smoke,Regression,End-to-End,Sanity.
+    # Consumed by pytest_collection_modifyitems (folder-precedence + DB test_types).
+    parser.addoption("--test-type",      action="store", default=None)
+
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Filter collected tests by the requested test type(s) (--test-type), with a
+    FOLDER-FIRST precedence so the two type mechanisms never conflict:
+
+      • A test whose file lives under tests/test_suites/<type>/ is kept iff that
+        folder's type is in the requested set. The DB is NOT consulted for it — the
+        folder location is the sole authority (tests/test_type_config.py).
+      • Every OTHER test falls back to the DB test_types tag: its function name is
+        matched to a testcase_key (prefix-normalised via discovery.normalize_match_key)
+        and kept iff its catalogued test_types intersect the requested set.
+
+    No --test-type → no filtering at all (full collection; backward compatible). If
+    MySQL is unreachable the DB-side check fails OPEN (keeps the test) so a transient
+    DB outage never silently drops shared/common tests.
+    """
+    raw = config.getoption("--test-type", None)
+    if not raw:
+        return  # backward compatible: no type filter requested → collect everything
+    requested = {p.strip() for p in str(raw).split(",") if p.strip()}
+    if not requested:
+        return
+
+    try:
+        from tests.test_type_config import type_folder_for_path
+    except ImportError:                       # when tests/ (not repo root) is the entry
+        from test_type_config import type_folder_for_path
+    from new_backend.modules.test_management.discovery import normalize_match_key
+
+    # DB testcase_key -> {test_types} map, built LAZILY and once — and only if we
+    # actually reach a non-folder test, so a folders-only run never touches MySQL.
+    _db = {"loaded": False, "by_key": {}}
+
+    def _db_types_by_key():
+        if _db["loaded"]:
+            return _db["by_key"]
+        _db["loaded"] = True
+        try:
+            from new_backend.modules.test_management.database import SessionLocal
+            from new_backend.modules.test_management.db_models import TestCase
+            session = SessionLocal()
+            try:
+                for key, types in session.query(TestCase.testcase_key, TestCase.test_types).all():
+                    _db["by_key"][normalize_match_key(key)] = set(types or [])
+            finally:
+                session.close()
+        except Exception as e:
+            print(f"[test-type] DB lookup unavailable ({e}); shared/common tests won't be type-filtered.")
+        return _db["by_key"]
+
+    kept, deselected = [], []
+    for item in items:
+        file_path = str(getattr(item, "path", None) or getattr(item, "fspath", ""))
+        folder_label = type_folder_for_path(file_path)
+
+        if folder_label is not None:
+            # Folder location is authoritative — keep iff its type was requested. Skip DB.
+            (kept if folder_label in requested else deselected).append(item)
+            continue
+
+        # Not under a test_suites/<type>/ folder → decide by the DB test_types tag.
+        by_key = _db_types_by_key()
+        if not by_key:
+            kept.append(item)   # DB unavailable → fail open (never silently drop)
+            continue
+        func_name = getattr(item, "originalname", None) or item.name.split("[")[0]
+        tags = by_key.get(normalize_match_key(func_name), set())
+        (kept if (tags & requested) else deselected).append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
+        print(f"[test-type] {sorted(requested)} -> kept {len(kept)}, deselected {len(deselected)}.")
 
 
 def pytest_sessionstart(session):

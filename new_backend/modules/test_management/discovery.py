@@ -10,6 +10,7 @@ nodes, so commented-out @allure.title(...) lines are excluded automatically.
 """
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -104,4 +105,45 @@ def discover_automation_tests(relative_path: str) -> list[dict]:
             # Key for matching to a DB testcase_key (tc_/test_ prefix stripped).
             "match_key": normalize_match_key(node.name),
         })
+    return results
+
+
+def discover_type_folder(type_label: str) -> list[dict]:
+    """Return every test function physically under tests/test_suites/<type>/.
+
+    For folder-defined tests the folder location IS the type authority (no DB tag),
+    so this powers the UI's "which tests will this type run" view. Walks the per-app
+    subfolders and reuses discover_automation_tests() per file. Each item adds:
+      • file — repo-relative path (e.g. tests/test_suites/smoke/regular_farmer/…)
+      • app  — the per-app subfolder name (regular_farmer / common / …)
+    The type→folder mapping is imported from tests/test_type_config.py so the folder
+    convention stays defined in exactly one place.
+    """
+    try:
+        from tests.test_type_config import folder_for_type
+    except ImportError:
+        return []
+
+    folder = folder_for_type(type_label)
+    if not folder or not os.path.isdir(folder):
+        return []
+
+    folder_abs = os.path.abspath(folder)
+    results: list[dict] = []
+    for root, _dirs, files in os.walk(folder_abs):
+        for fname in sorted(files):
+            if not (fname.startswith("test_") and fname.endswith(".py")):
+                continue
+            abs_path = os.path.join(root, fname)
+            rel = os.path.relpath(abs_path, _REPO_ROOT).replace("\\", "/")
+            sub = os.path.relpath(abs_path, folder_abs).replace("\\", "/")
+            app = sub.split("/")[0] if "/" in sub else ""
+            try:
+                for fn in discover_automation_tests(rel):
+                    item = dict(fn)
+                    item["file"] = rel
+                    item["app"] = app
+                    results.append(item)
+            except Exception:
+                continue  # skip a file that fails to parse rather than 500 the whole view
     return results

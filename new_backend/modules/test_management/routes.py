@@ -158,6 +158,12 @@ def discover_automation_tests(path: str):
     return service.discover_automation_tests_flow(path)
 
 
+@router.get("/test-type-tests", response_model=list[schemas.TypeFolderTest])
+def discover_type_folder_tests(type: str):
+    """Tests physically located under tests/test_suites/<type>/ (folder-defined type)."""
+    return service.discover_type_folder_flow(type)
+
+
 # ── Test Runs ─────────────────────────────────────────────────────────────
 @router.post("/run-tests", response_model=schemas.RunTestsSummary, status_code=status.HTTP_201_CREATED)
 def run_tests(payload: schemas.TestRunCreate, db: Session = Depends(get_db)):

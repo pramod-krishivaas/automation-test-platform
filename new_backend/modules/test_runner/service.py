@@ -428,6 +428,7 @@ async def start_test_flow(request, background_tasks, manager):
             app_type=app_variant,
             login_phone=getattr(request, "login_phone", None),
             login_mpin=getattr(request, "login_mpin", None),
+            test_types=getattr(request, "test_types", None),
         )
 
         return {
@@ -545,6 +546,7 @@ async def start_test_existing_flow(request, background_tasks, manager):
             app_type=getattr(request, "app_type", None) or app_variant,
             login_phone=getattr(request, "login_phone", None),
             login_mpin=getattr(request, "login_mpin", None),
+            test_types=getattr(request, "test_types", None),
         )
 
 
