@@ -10,8 +10,8 @@ from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException, NoSuchElementException
-from utils.wait_utils import smart_click, scroll_up_and_tap_by_text
-from utils.ui_actions import android_back_func
+from tests.utils.wait_utils import smart_click, scroll_up_and_tap_by_text
+from utils.ui_actions import android_back_func, smart_send_keys, generate_mobile_number
 
 sys.dont_write_bytecode = True
 
@@ -19,6 +19,7 @@ sys.dont_write_bytecode = True
 def load_locators_once(self, request):
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     locators_path = os.path.join(project_root, "locators", "state_client.json")
+    print(f"Loading locators from: {locators_path}")
     with open(locators_path, "r", encoding="utf-8", errors="replace") as f:
         raw = f.read()
     raw = re.sub(r"\\u(?![0-9a-fA-F]{4})", r"\\\\u", raw)
@@ -78,7 +79,7 @@ def load_locators_once(self, request):
 
     # ── add crop screen ──────────────────────────────────────────────────────
     request.cls.crop_name_dropdown_xpath = resolve("add_crop_screen", "crop_name_dropdown")
-    request.cls.crop_name_xpath = resolve("add_crop_screen", "crop_name")
+    request.cls.crop_name_item_xpath = resolve("add_crop_screen", "crop_name")
     request.cls.short_duration_button_xpath = resolve("add_crop_screen", "short_duration_button")
     request.cls.long_duration_button_xpath = resolve("add_crop_screen", "long_duration_button")
     request.cls.medium_duration_button_xpath = resolve("add_crop_screen", "medium_duration_button")
@@ -111,10 +112,10 @@ class TestOnboarding:
 # ===========================================================================
 
 def add_button(driver, obj, test_flow_steps):
-    with allure.step("1. Click Add Farm button"):
+    with allure.step("1. Click Add button"):
         time.sleep(3)
         if not smart_click(
-            driver, "Add Farm button", obj.add_button_dashboard_xpath, "Add Farm"
+            driver, "Add button", obj.add_button_dashboard_xpath, "Add"
         ):
             pytest.fail("Could not find or click the 'Add' button.")
         test_flow_steps.append({"step": "Click Add button", "status": "Success"})
@@ -123,10 +124,37 @@ def add_farmer_button(driver, obj, test_flow_steps):
     with allure.step("1. Click Add Farmer button"):
         time.sleep(3)
         if not smart_click(
-            driver, "Add Farmer button", obj.add_button_dashboard_xpath, "Add Farmer"
+            driver, "Add Farmer button", obj.add_new_farmer_option_xpath, "Add Farmer"
         ):
             pytest.fail("Could not find or click the 'Add Farmer' button.")
         test_flow_steps.append({"step": "Click Add Farmer button", "status": "Success"})
+
+def add_farmer_name_input(driver, obj, test_flow_steps):
+    with allure.step("1. Enter Farmer Name"):
+        time.sleep(3)
+        if not smart_send_keys(
+            driver, obj.add_farmer_name_xpath, "John Doe", element_name="Farmer Name input"
+        ):
+            pytest.fail("Could not find or interact with the 'Farmer Name' input field.")
+        test_flow_steps.append({"step": "Enter Farmer Name", "status": "Success"})
+
+def add_farmer_phone_input(driver, obj, test_flow_steps):
+    with allure.step("1. Enter Farmer Phone"):
+        time.sleep(3)
+        if not smart_send_keys(
+            driver, obj.add_farmer_phone_xpath, generate_mobile_number(), element_name="Farmer Phone input"
+        ):
+            pytest.fail("Could not find or interact with the 'Farmer Phone' input field.")
+        test_flow_steps.append({"step": "Enter Farmer Phone", "status": "Success"})
+
+def submit_button_add_farmer(driver, obj, test_flow_steps):
+    with allure.step("1. Click Submit button on Add Farmer screen"):
+        time.sleep(3)
+        if not smart_click(
+            driver, "Submit button on Add Farmer screen", obj.submit_button_add_farmer_xpath, "Submit"
+        ):
+            pytest.fail("Could not find or click the 'Submit' button on the 'Add Farmer' screen.")
+        test_flow_steps.append({"step": "Click Submit button on Add Farmer screen", "status": "Success"})
 
 def farm_village_dropdown(driver, obj, test_flow_steps):
     with allure.step("1. Click Farm village dropdown"):
@@ -137,57 +165,113 @@ def farm_village_dropdown(driver, obj, test_flow_steps):
             pytest.fail("Could not find or click the 'Farm village dropdown' button.")
         test_flow_steps.append({"step": "Click Farm village dropdown", "status": "Success"})
 
-
-
-
-def add_farm(driver, obj, test_flow_steps):
-    with allure.step("1. Click Add Farm button"):
+def farm_village_item(driver, obj, test_flow_steps):
+    with allure.step("1. Click Farm village item"):
         time.sleep(3)
         if not smart_click(
-            driver, "Add Farm button", obj.add_farm_button_xpath, "Add Farm"
+            driver, "Farm village item", obj.farm_village_item_xpath, "Farm village item"
         ):
-            pytest.fail("Could not find or click the 'Add Farm' button.")
-        test_flow_steps.append({"step": "Click Add Farm button", "status": "Success"})
+            pytest.fail("Could not find or click the 'Farm village item' button.")
+        test_flow_steps.append({"step": "Click Farm village item", "status": "Success"})
 
-
-def draw_on_map_button(driver, obj, test_flow_steps):
-    with allure.step("2. Click Draw on Map button"):
+def download_boundary_button(driver, obj, test_flow_steps):
+    with allure.step("1. Click Download Boundary button"):
         time.sleep(3)
         if not smart_click(
-            driver,
-            "Draw on map (button in determine boundary)",
-            obj.draw_on_map_button_xpath,
-            "Draw on map",
+            driver, "Download Boundary button", obj.download_boundary_button_xpath, "Download Boundary"
         ):
-            pytest.fail("Could not find or click the 'draw on map' button.")
-        test_flow_steps.append({"step": "Click Verify OTP", "status": "Success"})
+            pytest.fail("Could not find or click the 'Download Boundary' button.")
+        test_flow_steps.append({"step": "Click Download Boundary button", "status": "Success"})
 
-
-def farm_name_populated(driver, obj, test_flow_steps):
-    try:
-        el = driver.find_element(AppiumBy.XPATH, obj.farm_name_xpath)
-        text = (el.get_attribute("text") or "").strip()
-        return el if text else False
-    except NoSuchElementException:
-        test_flow_steps.append({"step": "Farm name auto-populated", "status": "Success"})
-    
-
-def submit_farm(driver, obj, test_flow_steps):
-    with allure.step("3. Click Submit Farm button"):
+def submit_village(driver, obj, test_flow_steps):
+    with allure.step("1. Click Submit village"):
         time.sleep(3)
-        if not smart_click(driver, "Submit farm", obj.submit_button_xpath, "Submit"):
-            pytest.fail("Could not find or click the 'Submit farm' button.")
-        test_flow_steps.append({"step": "Click Submit farm", "status": "Success"})
+        if not smart_click(
+            driver, "Submit village", obj.submit_button_farm_villages_xpath, "Submit village"
+        ):
+            pytest.fail("Could not find or click the 'Submit village' button.")
+        test_flow_steps.append({"step": "Click Submit village", "status": "Success"})
 
+# ===========================================================================
+# Add Farm Actions
+# ===========================================================================
 
-def crop_name_input(driver, obj, test_flow_steps):
-    with allure.step("4. Click Crop Name input field"):
+def search_by_bunds_lat_long_option(driver, obj, test_flow_steps):
+    with allure.step("1. Click Search by bunds/Latitude/Longitude option"):
+        time.sleep(3)
+        if not smart_click(
+            driver, "Search by bunds/Latitude/Longitude option", obj.search_by_bunds_lat_long_option_xpath, "Search by bunds/Latitude/Longitude"
+        ):
+            pytest.fail("Could not find or click the 'Search by bunds/Latitude/Longitude' option.")
+        test_flow_steps.append({"step": "Click Search by bunds/Latitude/Longitude option", "status": "Success"})
+
+def click_search_by_bunds_lat_long_input(driver, obj, test_flow_steps):
+    with allure.step("1. Click Search by bunds/Latitude/Longitude input"):
+        time.sleep(3)
+        if not smart_click(
+            driver, "Search by bunds/Latitude/Longitude input", obj.search_by_bunds_lat_long_input_xpath, "Search by bunds/Latitude/Longitude"
+        ):
+            pytest.fail("Could not find or click the 'Search by bunds/Latitude/Longitude' input.")
+        test_flow_steps.append({"step": "Click Search by bunds/Latitude/Longitude input", "status": "Success"})
+
+def enter_search_by_bunds_lat_long_value(driver, obj, test_flow_steps, value="580"):
+    with allure.step(f"1. Enter '{value}' in Search by bunds/Latitude/Longitude field"):
+        time.sleep(3)
+        # smart_click can't type (it only clicks / OCR-taps), so grab the real element
+        # and send keys into it.
+        try:
+            field = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located(
+                    (AppiumBy.XPATH, obj.search_by_bunds_lat_long_option_xpath)
+                )
+            )
+        except Exception:
+            pytest.fail("Could not find the 'Search by bunds/Latitude/Longitude' input field to type into.")
+
+        try:
+            field.click()   # focus the field before typing
+        except Exception:
+            pass
+        try:
+            field.clear()   # drop any pre-filled value so we don't append to it
+        except Exception:
+            pass
+
+        field.send_keys(str(value))
+        test_flow_steps.append(
+            {"step": f"Enter '{value}' in Search by bunds/Latitude/Longitude field", "status": "Success"}
+        )
+
+def select_bund(driver, obj, test_flow_steps):
+    with allure.step("1. Select bund from search results"):
+        time.sleep(3)
+        if not smart_click(
+            driver, "Select bund from search results", obj.select_bund_xpath, "Select bund from search results"
+        ):
+            pytest.fail("Could not find or click the 'Select bund from search results' option.")
+        test_flow_steps.append({"step": "Select bund from search results", "status": "Success"})
+
+def confirm_bunds_selection_button(driver, obj, test_flow_steps):
+    with allure.step("1. Confirm bunds selection"):
+        time.sleep(3)
+        if not smart_click(
+            driver, "Confirm bunds selection", obj.confirm_bunds_selection_button_xpath, "Confirm bunds selection"
+        ):
+            pytest.fail("Could not find or click the 'Confirm bunds selection' button.")
+        test_flow_steps.append({"step": "Confirm bunds selection", "status": "Success"})
+
+# ===========================================================================
+# Add Crop Actions
+# ===========================================================================
+
+def crop_name_dropdown(driver, obj, test_flow_steps):
+    with allure.step("4. Click Crop Name dropdown"):
         time.sleep(10)
         if not smart_click(
-            driver, "Crop name input", obj.crop_name_input_xpath, "Select Crop Name"
+            driver, "Crop name dropdown", obj.crop_name_dropdown_xpath, "Select Crop Name"
         ):
-            pytest.fail("Could not find or click the 'Crop name input' field.")
-        test_flow_steps.append({"step": "Click crop name input", "status": "Success"})
+            pytest.fail("Could not find or click the 'Crop name dropdown' field.")
+        test_flow_steps.append({"step": "Click crop name dropdown", "status": "Success"})
 
 
 def crop_name_item(driver, obj, test_flow_steps):
@@ -197,7 +281,7 @@ def crop_name_item(driver, obj, test_flow_steps):
             driver,
             "select crop from dropdown (OCR)",
             obj.crop_name_item_xpath,
-            "Apples",
+            "Arecanut",
             screenshot_path="screenshots/crop_dropdown.png",
             force_ocr=True,
             ocr_attempts=3,
@@ -212,7 +296,7 @@ def plantation_date(driver, obj, test_flow_steps):
         if not smart_click(
             driver,
             "Plantation date input",
-            obj.plantation_date_input_xpath,
+            obj.plantation_date_xpath,
             "Plantation date input",
         ):
             pytest.fail("Could not find or click the 'Plantation date input' field.")
@@ -273,16 +357,16 @@ def sowing_date_input(driver, obj, test_flow_steps):
         test_flow_steps.append({"step": "Click sowing date input", "status": "Success"})
 
 
-def ok_button(driver, obj, test_flow_steps):
+def calendar_ok_button(driver, obj, test_flow_steps):
     with allure.step("9. Click OK on calendar"):
-        if not smart_click(driver, "OK button on calendar", obj.ok_button_xpath, "OK"):
+        if not smart_click(driver, "OK button on calendar", obj.calendar_ok_button_xpath, "OK"):
             pytest.fail("Could not find or click the 'OK' button.")
         test_flow_steps.append(
             {"step": "Click OK button on calendar", "status": "Success"}
         )
 
 
-def submit_crop(driver, obj, test_flow_steps):
+def submit_crop_button(driver, obj, test_flow_steps):
     with allure.step("10. Click Submit Crop button"):
         if not smart_click(
             driver, "Submit crop", obj.submit_crop_button_xpath, "Submit"

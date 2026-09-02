@@ -16,7 +16,7 @@ import os
 import json
 import allure
 import pytest
-
+import time
 from pages.common.login_page import load_locators_once, do_login
 from pages.common.switch_page import switch_to_app
 
@@ -38,10 +38,10 @@ def _account_for(role):
         with open(data_path, "r", encoding="utf-8") as f:
             accounts = json.load(f)
         acct = accounts.get("single_role", {}).get(role, {})
-        return acct.get("phone") or "9618574550", acct.get("mpin") or "1234"
+        return acct.get("phone") or "7660852538", acct.get("mpin") or "1234"
     except Exception as e:
         print(f"[data] Could not load accounts.json ({e}); using defaults.")
-        return "9618574550", "1234"
+        return "7660852538", "1234"
 
 
 @allure.epic("Login Flow")
@@ -72,6 +72,7 @@ class TestLogin:
             do_login(driver, self, test_flow_steps, phone_number=phone, mpin=mpin)
 
             # 2. Switch to the SELECTED app and run its suite directly — no landed-app
+            time.sleep(6)
             #    detection before or after the switch (per requirement).
             switch_to_app(driver, self, role, test_flow_steps)
 

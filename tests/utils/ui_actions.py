@@ -9,7 +9,7 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.common.exceptions import WebDriverException
 
 from selenium.common.exceptions import WebDriverException
-
+import random
 import time
 
 def _ensure_locator_is_tuple(locator):
@@ -166,3 +166,7 @@ def android_back_func(driver) -> bool:
         return True
     except Exception:
         return False
+
+def generate_mobile_number() -> str:
+    return str(random.randint(1, 5)) + "".join(str(random.randint(0, 9)) for _ in range(9))
+

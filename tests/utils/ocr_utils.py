@@ -7,6 +7,12 @@ import os
 import sys
 sys.dont_write_bytecode = True
 
+from utils.tesseract_setup import configure_tesseract
+
+# Point pytesseract at the Tesseract engine binary regardless of the caller's PATH
+# (the platform runs pytest in a subprocess whose env may not include scoop shims).
+configure_tesseract()
+
 def extract_text_with_coordinates(image_path):
     img = cv2.imread(image_path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)

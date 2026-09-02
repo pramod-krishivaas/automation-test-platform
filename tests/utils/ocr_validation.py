@@ -1,13 +1,15 @@
-import platform
 import logging
 import re
 from PIL import Image, ImageEnhance, ImageFilter
 import pytesseract
 
+from utils.tesseract_setup import configure_tesseract
+
 logger = logging.getLogger(__name__)
 
-if platform.system() == "Windows":
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Resolve the Tesseract engine binary wherever it's installed (PATH / scoop /
+# Program Files) instead of assuming one fixed path.
+configure_tesseract()
 
 _CFG_BLOCK  = "--psm 6 --oem 3"
 _CFG_SPARSE = "--psm 11 --oem 3"
