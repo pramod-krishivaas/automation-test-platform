@@ -5,6 +5,8 @@ import json
 import os
 import re
 import sys
+import io
+from PIL import Image, ImageChops
 
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,10 +15,9 @@ from selenium.common.exceptions import WebDriverException, NoSuchElementExceptio
 from tests.utils.wait_utils import open_date_picker, smart_click, scroll_and_click_text, wait_until_displayed
 from utils.ui_actions import android_back_func, generate_mobile_number, set_input_value
 from utils.location_utils import (
-    BOUNDARY_PX_ALLOWED, app_is_foreground, boundary_corners, boundary_pixels, cell_location, cells_for_run, drag_map,
-    map_has_rendered,
-    emptiest_side, run_minute, search_place, set_device_location, tap_boundary_corners,
-    wait_for_app_location, wait_for_map_to_settle,
+    BOUNDARY_PX_ALLOWED, PRESS_MS, RETRY_PRESS_MS, area_changed, area_snapshot, boundary_corners,
+    boundary_pixels, cell_location, cells_for_run, run_minute, search_place, set_device_location,
+    tap_boundary_corners, wait_for_map_to_settle,
 )
 
 sys.dont_write_bytecode = True
@@ -89,9 +90,6 @@ def load_locators_once(self, request):
     request.cls.draw_boundary_button_xpath = resolve("draw_boundary_screen", "draw_boundary_button")
     request.cls.search_input_xpath = resolve("draw_boundary_screen", "search-input")
     request.cls.search_result_xpath = resolve("draw_boundary_screen", "search-result")
-    # Optional: the map's "current location" button, to recentre on a new mocked
-    # location while the map is open. Without it only the run's first cell is used.
-    request.cls.current_location_button_xpath = resolve("draw_boundary_screen", "current_location_button")
 
 # ===========================================================================
 # TestOnboarding class — kept for backward compatibility
@@ -363,51 +361,29 @@ def set_run_location(driver, obj, test_flow_steps):
                                 "status": "Success" if obj.mock_location_set else "Skipped"})
 
 
-def _free_spot_for_boundary(driver, obj, box, tries=3, max_places=5):
-    """Put the map on ground with no existing boundary around `box` (screen area of
-    the new boundary); returns how, or None.
+def _free_spot_for_boundary(driver, obj, box, max_places=3):
+    """Ground with no existing boundary around `box` (the new boundary's area on
+    screen): this run's mocked cell, then the fallback places. Returns how it was
+    reached, or None."""
+    cell = (getattr(obj, "location_cells", None) or cells_for_run(TEST_AREA_RINGS))[0]
+    lat, lng = cell_location(TEST_AREA_CENTER, cell, TEST_AREA_CELL_M)
+    if not getattr(obj, "mock_location_set", False):
+        set_device_location(driver, lat, lng)              # 1. a known mock location
+    wait_for_map_to_settle(driver, box)                    # 2. wait for the map
+    found = boundary_pixels(driver, box)                   # 3. boundary-colour check
+    if found <= BOUNDARY_PX_ALLOWED:
+        return {"method": "mock GPS", "cell": cell, "latitude": lat, "longitude": lng,
+                "boundary_px_before": found}
+    print(f"[location] cell {cell} ({lat}, {lng}) already has a boundary ({found} px)")
 
-    First this run's mock-GPS cell. If that spot is taken, the map is moved and
-    checked again, up to `tries` in total: to the next cell when the map's
-    current-location button is known, otherwise by dragging the map towards the
-    side showing the fewest boundaries. After that, places are searched by name.
-    """
-    locate = getattr(obj, "current_location_button_xpath", None)
-    cells = getattr(obj, "location_cells", None) or cells_for_run(TEST_AREA_RINGS)
-    for i in range(tries):
-        cell, where = cells[i % len(cells)], None
-        if i == 0 or locate:
-            lat, lng = cell_location(TEST_AREA_CENTER, cell, TEST_AREA_CELL_M)
-            if (i > 0 or not getattr(obj, "mock_location_set", False)) and not set_device_location(driver, lat, lng):
-                break
-            seen = wait_for_app_location(driver, lat, lng)
-            if seen is False:
-                break  # the app ignores the mocked GPS: search by place name instead
-            if locate:
-                smart_click(driver, "current location button", locate, timeout=5)
-            where = {"method": "mock GPS", "cell": cell, "latitude": lat, "longitude": lng,
-                     "app_showed_location": seen is True}
-        else:
-            # No way to recentre on another cell, so move across the ground the map
-            # is already showing, towards where it shows the fewest boundaries.
-            side = emptiest_side(driver)
-            if not drag_map(driver, side):
-                break
-            where = {"method": "dragged the map", "towards": side, "from_cell": cells[0]}
-        wait_for_map_to_settle(driver, box, min_wait=3)
-        found = boundary_pixels(driver, box)
-        if found <= BOUNDARY_PX_ALLOWED:
-            return where
-        print(f"[location] try {i + 1}/{tries}: this spot already has a boundary ({found} px)")
-
-    start = run_minute() % len(FALLBACK_PLACES)
+    start = run_minute() % len(FALLBACK_PLACES)            # 6. fallback searches
     for place in (FALLBACK_PLACES[start:] + FALLBACK_PLACES[:start])[:max_places]:
         if not search_place(driver, obj.search_input_xpath, place):
             continue
-        wait_for_map_to_settle(driver, box, min_wait=3)
+        wait_for_map_to_settle(driver, box)
         found = boundary_pixels(driver, box)
         if found <= BOUNDARY_PX_ALLOWED:
-            return {"method": "place search", "place": place}
+            return {"method": "place search", "place": place, "boundary_px_before": found}
         print(f"[location] {place} already has a boundary there ({found} px); trying the next place")
     return None
 
@@ -445,37 +421,89 @@ def save_boundary_button(driver, obj, test_flow_steps):
         test_flow_steps.append({"step": "Click Save boundary", "status": "Success"})
 
 
-def draw_boundary_on_map(driver, obj, test_flow_steps):
-    with allure.step("36. Draw boundary polygon on map"):
-        # Corners worked out from where the map is on screen (fixed points like
-        # x=690 fell on the card's border just right of the map, x 33-687).
-        corners = boundary_corners(driver)
-        xs, ys = [x for x, _ in corners], [y for _, y in corners]
-        box = (min(xs), min(ys), max(xs), max(ys))
-        # The app has to be on screen with the map drawn: otherwise a crashed app or
-        # a map that never loaded looks like free ground and every tap goes nowhere.
-        if not app_is_foreground(driver):
-            pytest.fail("The app is not on screen any more: it stopped before the boundary could be "
-                        "drawn (see the 'Crash Logs' attachment).")
-        wait_for_map_to_settle(driver, box, min_wait=3)
-        if not map_has_rendered(driver, box):
-            pytest.fail("The map is blank where the boundary goes, so there is nothing to draw on: "
-                        "the map did not load on this device.")
-        # Then makes sure no existing boundary (green) is where this one goes: this
-        # run's mock-GPS cell, else a place by name.
-        spot = _free_spot_for_boundary(driver, obj, box)
-        if spot is None:
-            pytest.fail("No free spot for the boundary: the mocked location and the fallback "
-                        "places all show existing boundaries (or couldn't be reached).")
-        allure.attach(json.dumps(spot, indent=2), name="Boundary location",
-                      attachment_type=allure.attachment_type.JSON)
-        # 4 corners, each confirmed on screen; then the first point twice to close.
-        try:
-            tap_boundary_corners(driver, corners, closing_taps=2)
-        except AssertionError as e:
-            pytest.fail(f"Could not draw all 4 boundary corners: {e}")
-        test_flow_steps.append({"step": f"Draw Boundary on Map ({spot['method']})", "status": "Success"})
+# def draw_boundary_on_map(driver, obj, test_flow_steps):
+#     """Set a known location, wait for the map, check the ground is free, then tap
+#     the 4 corners around the map's centre and close the polygon."""
+#     with allure.step("36. Draw boundary polygon on map"):
+#         corners = boundary_corners(driver)                  # 4. relative to the map
+#         xs, ys = [x for x, _ in corners], [y for _, y in corners]
+#         box = (min(xs), min(ys), max(xs), max(ys))
+#         spot = _free_spot_for_boundary(driver, obj, box)     # 1, 2, 3 and 6
+#         if spot is None:
+#             pytest.fail("No free spot for the boundary: this run's mocked location and the "
+#                         "fallback places all show existing boundaries.")
+#         before = area_snapshot(driver, box)
+#         tap_boundary_corners(driver, corners)                # 5. tap and close
+#         spot["press_ms"] = PRESS_MS
+#         if not area_changed(before, area_snapshot(driver, box)):
+#             # Nothing appeared. The press length decides whether the map sees a tap
+#             # (which adds a vertex) or a long press (which doesn't), so try the other.
+#             print(f"[boundary] nothing was drawn with a {PRESS_MS} ms press; "
+#                   f"trying again with {RETRY_PRESS_MS} ms")
+#             tap_boundary_corners(driver, corners, press_ms=RETRY_PRESS_MS)
+#             spot["press_ms"] = RETRY_PRESS_MS
+#             if not area_changed(before, area_snapshot(driver, box)):
+#                 pytest.fail(f"The taps drew nothing on the map: a {PRESS_MS} ms press and a "
+#                             f"{RETRY_PRESS_MS} ms tap both left {corners} unchanged. Check the app is "
+#                             "still on screen (see the 'Crash Logs' attachment) and that drawing mode is on.")
+#         spot["boundary_px_after"] = boundary_pixels(driver, box)
+#         allure.attach(json.dumps(spot, indent=2), name="Boundary location",
+#                       attachment_type=allure.attachment_type.JSON)
+#         test_flow_steps.append({"step": f"Draw Boundary on Map ({spot['method']})", "status": "Success"})
 
+def _map_area(driver, box):
+    """The boundary's area on screen, to compare before and after tapping."""
+    screen = Image.open(io.BytesIO(driver.get_screenshot_as_png())).convert("RGB")
+    return screen.crop(box)
+
+
+def _area_changed(before, after, threshold=0.01):
+    """True when more than `threshold` of the area's pixels changed."""
+    if before.size != after.size:
+        return True
+    diff = ImageChops.difference(before, after).convert("L")
+    changed = sum(count for value, count in enumerate(diff.histogram()) if value > 40)
+    return changed > threshold * before.size[0] * before.size[1]
+
+
+def draw_boundary_on_map(driver, obj, test_flow_steps):
+    with allure.step("16. Draw boundary polygon on map"):
+        time.sleep(15)  # Wait for map to fully load
+
+        # The map covers only part of the screen — on a 720x1600 phone it ends at
+        # x=687 — so the old x=690 corners landed on the card's border beside the
+        # map and drew nothing. These are shares of the screen, inside the map and
+        # clear of the search box, the side buttons, the compass and the logo.
+        size = driver.get_window_size()
+        left, right = int(size["width"] * 0.30), int(size["width"] * 0.70)
+        top, bottom = int(size["height"] * 0.48), int(size["height"] * 0.62)
+        coordinates = [
+            (left, top),      # Top-left corner
+            (right, top),     # Top-right corner
+            (right, bottom),  # Bottom-right corner
+            (left, bottom),   # Bottom-left corner
+            (left, top),      # Close the polygon (first point)
+            (left, top),      # Confirm close
+        ]
+
+        before = _map_area(driver, (left, top, right, bottom))
+        for coord in coordinates:
+            # 100 ms is a tap, which is what adds a vertex; the old 1000 ms press
+            # was a long press, which the map ignores. The gap matters too: Google
+            # Maps drops a tap when another follows within about 300 ms.
+            driver.tap([coord], 100)
+            time.sleep(1)
+
+        # Only report success if the taps actually drew something.
+        if driver.current_package != (driver.capabilities or {}).get("appPackage"):
+            pytest.fail("The app is not on screen any more: it crashed before the boundary was "
+                        "drawn (see the 'Crash Logs' attachment).")
+        if not _area_changed(before, _map_area(driver, (left, top, right, bottom))):
+            pytest.fail(f"The boundary was not drawn: tapping {coordinates[:4]} left the map "
+                        "unchanged. Check that the points are on the map and drawing mode is on.")
+        test_flow_steps.append({"step": "Draw Boundary on Map", "status": "Success"})
+
+        
 def save_approve_boundary(driver, obj, test_flow_steps):
     with allure.step("14. Click Save boundary"):
         if not smart_click(

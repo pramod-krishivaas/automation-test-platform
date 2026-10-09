@@ -11,11 +11,11 @@ from appium.webdriver.common.appiumby import AppiumBy
 from utils.location_utils import reset_device_location
 
 from tests.pages.regular_farmer.regular_farmer_onboarding_page import (
-    inter_crop_name_dropdown, inter_crop_name_item, inter_crop_name_search_input, inter_crop_short_duration_button, inter_crop_sowing_date_input, load_locators_once,
-    crop_name_dropdown, crop_name_item, plantation_date,
+    inter_crop_name_dropdown, inter_crop_name_item, inter_crop_name_search_input, inter_crop_short_duration_button, inter_crop_sowing_date_input, crop_name_dropdown, crop_name_item, plantation_date,
     calendar_ok_button, submit_crop_button,
+    load_locators_once,
     submit_button_add_farm, draw_boundary_buton_on_modal, draw_boundary_on_map, save_boundary_button,
-    set_run_location, add_farm_btn
+    set_run_location, add_farm_btn, skip_crop
 )
 
 
@@ -55,6 +55,7 @@ class TestOnboarding:
                 inter_crop_sowing_date_input(driver, self, test_flow_steps)
                 calendar_ok_button(driver, self, test_flow_steps)
                 submit_crop_button(driver, self, test_flow_steps)
+                # skip_crop(driver, self, test_flow_steps)
                 draw_boundary_on_map(driver, self, test_flow_steps)
                 # search_input(driver, self, test_flow_steps)
                 # search_result(driver, self, test_flow_steps)

@@ -149,7 +149,8 @@
       "calendar_ok_button": "//android.widget.Button[@resource-id=\"android:id/button1\"]",
       "transplanted_date": "(//android.widget.TextView[@text=\"\"])[1]",
       "plantation_date": "//android.view.ViewGroup[@content-desc=\"Plantation Date\"]",
-      "inter_crop_sowing_date": "//android.view.ViewGroup[@content-desc=\"Inter-Crop Sowing Date\"]"
+      "inter_crop_sowing_date": "//android.view.ViewGroup[@content-desc=\"Inter-Crop Sowing Date\"]",
+      "skip_crop_button": "//android.view.ViewGroup[@content-desc=\"Skip\"]"
     },
     "draw_boundary_screen": {
       "save_boundary_button": "//android.view.ViewGroup[@content-desc=\"Save Boundary\"]",
