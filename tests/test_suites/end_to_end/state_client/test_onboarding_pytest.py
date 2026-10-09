@@ -27,7 +27,7 @@ class TestOnboarding:
         load_locators_once(self, request)
 
     @allure.story("Successful Onboarding")
-    @allure.title("Dashboard → Add Farmer → Add Farm → Add Crop")
+    @allure.title("E2E_SC_001 -- Dashboard → Add Farmer → Add Farm → Add Crop")
     def test_add_new_farmer_farm_crop_flow(self, driver):
             test_flow_steps = []
             try:
