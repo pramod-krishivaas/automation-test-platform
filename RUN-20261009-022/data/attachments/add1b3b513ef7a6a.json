@@ -1,0 +1,23 @@
+{
+  "ticket_id": "RUN-20261009-104201",
+  "issue_id": "ISS-001",
+  "app_name": "Krishivaas",
+  "app_version": "2.5.1",
+  "module": "Onboarding",
+  "feature": "Authentication",
+  "issue_summary": "Automation Failure: test_add_new_farmer_farm_crop_flow",
+  "title": "Automation Failure: test_add_new_farmer_farm_crop_flow",
+  "test_name": "test_add_new_farmer_farm_crop_flow",
+  "steps_executed": [],
+  "developer_name": "pramod",
+  "description": ">               pytest.fail(\"The app is not on screen any more: it crashed before the boundary was \"\nFailed: The app is not on screen any more: it crashed before the boundary was drawn (see the 'Crash Logs' attachment).",
+  "start_date": "2026-10-09T10:42:52.177677",
+  "end_date": "2026-10-09T10:44:00.692147",
+  "sprint": "Automation",
+  "fix_version": [
+    "Production"
+  ],
+  "affects_version": [
+    "Krishivaas"
+  ]
+}
